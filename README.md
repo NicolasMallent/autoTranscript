@@ -88,7 +88,7 @@ Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
 #### 2.1 Pour préparer le drive (à faire une seule fois)
 ##### 2.1.1 Sources
 - [article](https://kevinstratvert.com/2023/01/19/best-free-speech-to-text-ai-whisper-ai/)
-- [vidéo](https://www.youtube.com/watch?v=8SQVB83tPU&ab_channel=KevinStratvert)
+- [vidéo](https://www.youtube.com/watch?v=8SQV-B83tPU)
 
 ##### 2.1.2 Installer Google Colaboratory 
 
