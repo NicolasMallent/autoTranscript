@@ -24,8 +24,7 @@ Fichiers à télécharger puis installer :
 
 - python 3.11
     - https://www.python.org/downloads/release/python-3110/
-    - Prendre Windows installer (64-bit) 
-    - https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
+    - Prendre Windows installer (64-bit) => https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
 
 - ﬀmpeg
     - https://github.com/BtbN/FFmpeg-Builds/releases
