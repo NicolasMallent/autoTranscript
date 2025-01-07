@@ -23,7 +23,7 @@ Cette étape est indiquée au point 1.3.1, une fois que vous aurez configuré Wh
 **Avertissement**  
 La transcription automatique par Whisper est un travail relativement lourd pour l’ordinateur, ainsi, il est préférable d’utiliser une machine un peu puissante pour que les transcriptions ne durent pas trop longtemps. Si vous avez un ordinateur portable, préférez lancer les transcriptions la nuit lorsque vous n’avez pas besoin de votre ordinateur.  
 
-La configuration suivante n’est disponible que sur Windows et Linux. Si vous avez un Mac, vous pouvez créer une partition sur votre disque dur pour installer Windows ou Linux et utiliser Whisper en local.  
+La configuration suivante n’est disponible que sur Windows. Si vous avez un Mac, vous pouvez créer une partition sur votre disque dur pour installer Windows et utiliser Whisper en local.  
 
 #### 1.1 Configurer whisper
 
