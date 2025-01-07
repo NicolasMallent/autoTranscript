@@ -7,7 +7,7 @@ Transcription automatique avec Whisper AI (en local / en ligne)
 ## Préambule 
 Vous avez le choix entre deux options :   
 -   soit installer whisper directement sur votre machine (en local, donc) si vous disposez d’un émulateur PYTHON.  
--   soit (et c’est ce que j’utilise moi) utiliser un émulateur PYTHON en ligne (gg colaboratory).  
+-   soit (et c’est ce que j’utilise moi (note de l'auteure)) utiliser un émulateur PYTHON en ligne (gg colaboratory).  
 
 ## Récupération du projet
 
@@ -17,55 +17,59 @@ Télécharger ce projet en cliquant sur `< > Code > Download ZIP` (Comme montré
 ### 1. Configurer et utiliser whisper en local
 
 Whisper est un logiciel libre de OpenAI. La configuration proposée ci-dessous respecte le cadre de la RGDP puisque les transcriptions sont réalisées en “***local***.”
+Whisper ne fonctionne qu’avec des fichiers audio, il vous sera indispensable d’extraire le son des vidéos pour pouvoir les transcrire.
+Cette étape est indiquée au point 1.3.1, une fois que vous aurez configuré Whisper mais vous pouvez commencer le tutoriel par ce point avant de revenir au 1.1.  
+
+**Avertissement**  
+La transcription automatique par Whisper est un travail relativement lourd pour l’ordinateur, ainsi, il est préférable d’utiliser une machine un peu puissante pour que les transcriptions ne durent pas trop longtemps. Si vous avez un ordinateur portable, préférez lancer les transcriptions la nuit lorsque vous n’avez pas besoin de votre ordinateur.  
+
+La configuration suivante n’est disponible que sur Windows et Linux. Si vous avez un Mac, vous pouvez créer une partition sur votre disque dur pour installer Windows ou Linux et utiliser Whisper en local.  
 
 #### 1.1 Configurer whisper
 
-Fichiers à télécharger puis installer :
+Les fichiers proposés sont à télécharger et à installer les uns après les autres dans l’ordre suivant :
 
-- python 3.11
-    - https://www.python.org/downloads/release/python-3110/
-    - Prendre Windows installer (64-bit) 
-    - https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
+- [python 3.11](https://www.python.org/downloads/release/python-3110/)
+A partir du lien ci-dessus, sélectionner « Windows installer (64-bit) » ou télécharger directement le fichier depuis le lien suivant : https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
 
-- ﬀmpeg
-    - https://github.com/BtbN/FFmpeg-Builds/releases
-    - prendre [ﬀmpeg-master-latest-win64-gpl.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ﬀmpeg-master-latest-win64-gpl.zip)
+- [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
+A partir du lien ci-dessus, sélectionner « ffmpeg-master-latest-win64-gpl-shared.zip » ou télécharger le fichier depuis le lien suivant : [ﬀmpeg-master-latest-win64-gpl.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ﬀmpeg-master-latest-win64-gpl.zip)
 
-- git
-    - https://git-scm.com/download/win
-    - prendre la version [64-bit Git for Windows Setup](https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe)
-    - laisser coché tout tel quel pendant l’installation
+- [git](https://git-scm.com/download/win)
+A partir du lien ci-dessus, sélectionner la version « 64-bit Git for Windows Setup » ou télécharger le fichier depuis le lien suivant : [64-bit Git for Windows Setup](https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe)
+    - Lors de l’installation, ne modifiez pas les coches par défaut, laisser la configuration telle quelle.
 
-- pycharm : à installer en dernier
-    - https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
+- pycharm : (à installer en dernier)
+Télécharger le fichier depuis le lien suivant : https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
     - prendre pycharm-community-2023.2.51.2
 
 
 #### 1.2 Utiliser whisper pour la première fois
 
+- Créer un dossier de sauvegarde de vos transcriptions sur votre bureau ou à l’endroit que vous souhaitez et copier le chemin d’accès à ce dossier.
 - Lancer pycharm
 - Créer un nouveau projet pour toutes les transcriptions par whisper :
-    -  Donner un nom rappelant sa fonction : « whisper », « transcrire », etc.
+    - Donner un nom rappelant sa fonction : « whisper », « transcrire », etc.
+    - Préciser la localisation du dossier de sauvegarde en collant le lien du chemin précédemment copié
     - Vériﬁer que venv est coché
-- Clic droit sur le dossier `.venv > New > Python File`, nommez le fichier main.py, par exemple.
-  - Copier le **contenu** d'autoTranscript/main.py et collez-le dans le .venv/main.py que vous venez de créer
+- Clic droit sur le dossier `.venv > New > Python File`, nommez le fichier ainsi créé (le tutoriel utilisera le nom « main.py »).
+  - Copier le **contenu** d'autoTranscript/main.py téléchargé à la toute première étape de ce tutoriel (« Récupération du projet ») et collez-le dans le .venv/main.py que vous venez de créer
 - Dans le fichier .venv/main.py, si whisper est souligné en rouge :
   - Ouvrir le terminal de l’environnement virtuel venv 
   - Recopier et entrer : `pip install git+https://github.com/openai/whisper.git`
-> C'est possible que vous ayez un problème avec numpy, pour le régler, faites:  `pip install numpy<2`
+> Il est possible que vous ayez un problème avec numpy, pour le régler, faites:  `pip install numpy<2`
 
 #### 1.3 Utiliser Whisper
 > Attention !
-> Le chemin et le nom des fichiers ne doivent pas comporter d'espaces, d'accents ou tout autres caractères spéciaux.  
+> Le chemin et le nom des fichiers ne doivent pas comporter d'espaces, d'accents ou tout autre caractère spécial.  
 > Privilégiez des `_` ou des `-` pour remplacer les espaces.
 
 ##### 1.3.1 Extraction du son d’une vidéo locale
 
-- Télécharger et installer Audacity : 
-    - [Audacity](https://www.audacityteam.org/download/windows/)
+- Télécharger et installer [Audacity](https://www.audacityteam.org/download/windows/):
     - Choisir : 64 bit installer (recommended).
 - Ouvrir Audacity.
-- Vériﬁer que ﬀmpeg est disponible (une seule fois) :
+- Vériﬁer que ﬀmpeg est disponible (étape à ne réaliser qu’une seule fois) :
     - Cliquer sur `Edition > Préférences > Bibliothèques`.
     - Bibliothèque FFmpeg : cliquer sur Localiser... puis, si nécessaire, sur Téléchargement.
 - Glisser la vidéo sur l’écran d’Audacity.
@@ -73,20 +77,20 @@ Fichiers à télécharger puis installer :
 
 ##### 1.3.2 Mise en route de Whisper
 
-- Ouvrir PyCharm, et le projet pour Whisper.
+- Ouvrir PyCharm, et le projet que vous avez créé dans Whisper.
 - Aller dans le dossier .venv (environnement virtuel), le sous-dossier du projet.
 - Ce script a besoin qu'on lui donne 2 paramètres d'entrées :
   - Le chemin vers le dossier où sont stockés les enregistrements :
       - Dans `Run > Edit Configurations`, remplissez le champ "Script Parameters" avec le chemin de votre dossier (par exemple "C:\Users\admin\Documents\audio")
       - Cliquez sur le bouton `Apply` puis `OK`
-      - Pour récupérer le chemin du dossier : clic droit sur la barre du dossier contenant le fichier mp3, puis choisir Copier l’adresse sous forme de texte.
+      - Pour récupérer le chemin du dossier : clic droit sur la barre du dossier contenant le fichier mp3, puis choisir "Copier l’adresse sous forme de texte".
   - Ainsi que le modèle de vocabulaire (pour indiquer à la transcription le modèle de vocabulaire à utiliser) :
       - "base" : petit, téléchargement immédiat (139 M)
       - "medium" : moyen, téléchargement 20 minutes (1.42 G)
-      - "large" : grand, téléchargement 1 heure (2,88 G)
+      - "large" : grand, téléchargement 1 heure (2,88 G) > privilégier ce modèle pour une transcription de qualité
 - Exécuter main.py
 
-> Le téléchargement du modèle de vocabulaire se fait qu'une fois.
+> Le téléchargement du modèle de vocabulaire ne se fait qu'une fois.
 
 ![Une image descriptive](ressources/edit_config.png)
 
