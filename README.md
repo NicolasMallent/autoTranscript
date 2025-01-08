@@ -2,7 +2,7 @@
 # autoTranscript  
 Transcription automatique avec Whisper AI (en local / en ligne)
 #### Authors : Cécile de Hosson (UPCité - LDAR)  & Sylviane Pompéï (UPCité - LDAR)
-#### Contributors : Nicolas Mallent (Ingénieur Recherche et Développement Robotique)
+#### Contributor : Nicolas Mallent (Ingénieur Recherche et Développement Robotique)
 
 ## Préambule 
 Vous avez le choix entre deux options :   
@@ -30,17 +30,21 @@ La configuration suivante n’est disponible que sur Windows. Si vous avez un Ma
 Les fichiers proposés sont à télécharger et à installer les uns après les autres dans l’ordre suivant :
 
 - [python 3.11](https://www.python.org/downloads/release/python-3110/)
-A partir du lien ci-dessus, sélectionner « Windows installer (64-bit) » ou télécharger directement le fichier depuis le lien suivant : https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
+A partir du lien ci-joint, sélectionner « Windows installer (64-bit) » ou télécharger directement le fichier depuis le lien suivant :
+https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
 
 - [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
-A partir du lien ci-dessus, sélectionner « ffmpeg-master-latest-win64-gpl-shared.zip » ou télécharger le fichier depuis le lien suivant : [ﬀmpeg-master-latest-win64-gpl.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ﬀmpeg-master-latest-win64-gpl.zip)
+A partir du lien ci-joint, sélectionner « ffmpeg-master-latest-win64-gpl-shared.zip » ou télécharger le fichier depuis le lien suivant :
+[ﬀmpeg-master-latest-win64-gpl.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ﬀmpeg-master-latest-win64-gpl.zip)
 
 - [git](https://git-scm.com/download/win)
-A partir du lien ci-dessus, sélectionner la version « 64-bit Git for Windows Setup » ou télécharger le fichier depuis le lien suivant : [64-bit Git for Windows Setup](https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe)
+A partir du lien ci-joint, sélectionner la version « 64-bit Git for Windows Setup » ou télécharger le fichier depuis le lien suivant :  
+[64-bit Git for Windows Setup](https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe)
     - Lors de l’installation, ne modifiez pas les coches par défaut, laisser la configuration telle quelle.
 
 - pycharm : (à installer en dernier)
-Télécharger le fichier depuis le lien suivant : https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
+Télécharger le fichier depuis le lien suivant :  
+https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
     - prendre pycharm-community-2023.2.51.2
 
 
@@ -96,7 +100,7 @@ Télécharger le fichier depuis le lien suivant : https://www.jetbrains.com/fr-f
 
 #### 1.4 Récupération des fichiers transcrits
 
-Les fichiers ont pour nom « output_<nom_de_l_audio>_<modele>.txt ». 
+Les fichiers ont pour nom « output_<nom_de_l_audio>_<modèle>.txt ».   
 Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
 
 ### 2. Configurer et utiliser Whisper en ligne
