@@ -1,7 +1,7 @@
 
 # autoTranscript  
 Transcription automatique avec Whisper AI (en local / en ligne)
-#### Author : Cécile de Hosson (UPCité - LDAR)  
+#### Author : Cécile de Hosson (UPCité - LDAR)  & Sylviane Pompéï (UPCité - LDAR)
 #### Contributors : Nicolas Mallent (Ingénieur Recherche et Développement Robotique)
 
 ## Préambule 
