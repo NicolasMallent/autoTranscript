@@ -34,8 +34,8 @@ A partir du lien ci-joint, sélectionner « Windows installer (64-bit) » ou té
 https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
 
 - [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
-A partir du lien ci-joint, sélectionner « ffmpeg-master-latest-win64-gpl-shared.zip » ou télécharger le fichier depuis le lien suivant :
-[ﬀmpeg-master-latest-win64-gpl.zip](https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ﬀmpeg-master-latest-win64-gpl.zip)
+A partir du lien ci-joint, télécharger « ffmpeg-master-latest-win64-gpl-shared.zip ». Une fois téléchargé, dézippez le et renommer le "ffmpeg" puis copier/coller le dossier dans le dossier `C:\Program Files\` avec les droits d'admin.  
+Une fois fait, vous devriez avoir `C:\Program Files\ffmpeg` qui contient les sous dossiers bin, doc, include, etc..
 
 - [git](https://git-scm.com/download/win)
 A partir du lien ci-joint, sélectionner la version « 64-bit Git for Windows Setup » ou télécharger le fichier depuis le lien suivant :  

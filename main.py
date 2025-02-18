@@ -14,7 +14,7 @@ def floatToTime(time_float: float):
 
 if __name__ == '__main__':
     if "ffmpeg" not in os.environ["PATH"]:
-        os.environ["PATH"] += os.pathsep + "C:\\Program Files\\ffmpeg-master-latest-win64-gpl\\bin"
+        os.environ["PATH"] += os.pathsep + "C:\\Program Files\\ffmpeg\\bin"
 
     # Chemin du dossier où se trouve les fichiers audio : les \ deviennent des \\
     dossier = sys.argv[1]
@@ -35,6 +35,8 @@ if __name__ == '__main__':
     for fichier_audio in fichiers_audio:
         # Reconstruction du chemin vers le fichier audio
         chemin_fichier_audio = os.path.join(dossier, fichier_audio)
+
+        print("Fichier en cours de traitement: " + chemin_fichier_audio)
 
         # Le fichier de sorti (format texte) est sauvegardé à côté des fichiers audio (dans le même dossier)
         filename_without_extension = os.path.basename(chemin_fichier_audio).split(".")[0]
