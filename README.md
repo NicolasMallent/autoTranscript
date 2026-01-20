@@ -29,9 +29,9 @@ La configuration suivante n’est disponible que sur Windows. Si vous avez un Ma
 
 Les fichiers proposés sont à télécharger et à installer les uns après les autres dans l’ordre suivant :
 
-- [python 3.11](https://www.python.org/downloads/release/python-3110/)
+- [python 3.14](https://www.python.org/downloads/release/python-31114/)
 A partir du lien ci-joint, sélectionner « Windows installer (64-bit) » ou télécharger directement le fichier depuis le lien suivant :
-https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe
+https://www.python.org/ftp/python/3.14.2/python-3.14.2-amd64.exe
 
 - [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
 A partir du lien ci-joint, télécharger « ffmpeg-master-latest-win64-gpl-shared.zip ». Une fois téléchargé, dézippez le et renommer le "ffmpeg" puis copier/coller le dossier dans le dossier `C:\Program Files\` avec les droits d'admin.  
@@ -45,7 +45,7 @@ A partir du lien ci-joint, sélectionner la version « 64-bit Git for Windows Se
 - pycharm : (à installer en dernier)
 Télécharger le fichier depuis le lien suivant :  
 https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
-    - prendre pycharm-community-2023.2.51.2
+    - prendre pycharm-community-2025.3.1.1
 
 
 #### 1.2 Utiliser whisper pour la première fois
