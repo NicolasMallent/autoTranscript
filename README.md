@@ -1,115 +1,166 @@
+# AutoTranscript
 
-# autoTranscript  
-Transcription automatique avec Whisper AI (en local / en ligne)
-#### Authors : Cécile de Hosson (UPCité - LDAR), Sylviane Pompéï (UPCité - LDAR) & Pierre Andrieu (UPCité - LDAR)
-#### Contributor : Nicolas Mallent (Ingénieur Recherche et Développement Robotique)
+[![GitHub](https://img.shields.io/badge/GitHub-NicolasMallent%2FautoTranscript-blue?logo=github)](https://github.com/NicolasMallent/autoTranscript)
 
-## Préambule 
-Vous avez le choix entre deux options :   
--   soit installer whisper directement sur votre machine (en local, donc) si vous disposez d’un émulateur PYTHON.  
--   soit (et c’est ce que j’utilise moi (note de l'auteure)) utiliser un émulateur PYTHON en ligne (gg colaboratory).  
+Application de **transcription automatique** de fichiers audio et vidéo, utilisant [Whisper AI](https://github.com/openai/whisper) d'OpenAI.  
+Toutes les transcriptions sont réalisées **entièrement en local** — aucune donnée n'est envoyée sur internet. Conforme au **RGPD**.
 
-## Récupération du projet
+---
 
-Télécharger ce projet en cliquant sur `< > Code > Download ZIP` (Comme montré ci-dessous) :
-![Une image descriptive](ressources/Illustration_download.png)
+## Fonctionnalités
 
-### 1. Configurer et utiliser whisper en local
+- Interface graphique simple (français / anglais)
+- Transcription d'un fichier unique ou de tout un dossier
+- Accepte les fichiers **audio** (`.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`, `.aac`) et **vidéo** (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`)
+- Choix du modèle IA selon vos besoins (rapidité vs qualité)
+- Formats de sortie : `.txt` horodaté et/ou `.json` brut Whisper
+- Fonctionne sur **Windows 11** et **Linux**
 
-Whisper est un logiciel libre de OpenAI. La configuration proposée ci-dessous respecte le cadre de la RGDP puisque les transcriptions sont réalisées en “***local***.”
-Whisper ne fonctionne qu’avec des fichiers audio, il vous sera indispensable d’extraire le son des vidéos pour pouvoir les transcrire.
-Cette étape est indiquée au point 1.3.1, une fois que vous aurez configuré Whisper mais vous pouvez commencer le tutoriel par ce point avant de revenir au 1.1.  
+---
 
-**Avertissement**  
-La transcription automatique par Whisper est un travail relativement lourd pour l’ordinateur, ainsi, il est préférable d’utiliser une machine un peu puissante pour que les transcriptions ne durent pas trop longtemps. Si vous avez un ordinateur portable, préférez lancer les transcriptions la nuit lorsque vous n’avez pas besoin de votre ordinateur.  
+## Prérequis
 
-La configuration suivante n’est disponible que sur Windows. Si vous avez un Mac, vous pouvez créer une partition sur votre disque dur pour installer Windows et utiliser Whisper en local.  
+**Aucun.** L'installateur prend en charge tout automatiquement.
 
-#### 1.1 Configurer whisper
+> Sur Windows 11, `winget` est requis (installé par défaut sur Windows 11).  
+> Sur Linux, `sudo` est nécessaire pour installer ffmpeg si absent.
 
-Les fichiers proposés sont à télécharger et à installer les uns après les autres dans l’ordre suivant :
+---
 
-- [python 3.14](https://www.python.org/downloads/release/python-31114/)
-A partir du lien ci-joint, sélectionner « Windows installer (64-bit) » ou télécharger directement le fichier depuis le lien suivant :
-https://www.python.org/ftp/python/3.14.2/python-3.14.2-amd64.exe
+## Installation
 
-- [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)
-A partir du lien ci-joint, télécharger « ffmpeg-master-latest-win64-gpl-shared.zip ». Une fois téléchargé, dézippez le et renommer le "ffmpeg" puis copier/coller le dossier dans le dossier `C:\Program Files\` avec les droits d'admin.  
-Une fois fait, vous devriez avoir `C:\Program Files\ffmpeg` qui contient les sous dossiers bin, doc, include, etc..
+### Windows 11
 
-- [git](https://git-scm.com/download/win)
-A partir du lien ci-joint, sélectionner la version « 64-bit Git for Windows Setup » ou télécharger le fichier depuis le lien suivant :  
-[64-bit Git for Windows Setup](https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe)
-    - Lors de l’installation, ne modifiez pas les coches par défaut, laisser la configuration telle quelle.
+1. Téléchargez le projet depuis GitHub :  
+   `Code > Download ZIP`, puis dézippez le dossier.
 
-- pycharm : (à installer en dernier)
-Télécharger le fichier depuis le lien suivant :  
-https://www.jetbrains.com/fr-fr/pycharm/download/download-thanks.html?platform=windows&code=PCC
-    - prendre pycharm-community-2025.3.1.1
+2. [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)  
+Dézippez **autoTranscript/ffmpeg/windows/ffmpeg-master-latest-win64-gpl-shared.zip** et renommer le "ffmpeg" puis copier/coller le dossier dans le dossier `C:\Program Files\` avec les droits d'admin. Une fois fait, vous devriez avoir `C:\Program Files\ffmpeg` qui contient les sous dossiers bin, doc, include, etc..
+
+3. Ouvrez le dossier `installer/`, faites un **clic droit** sur `install.ps1` et choisissez **"Exécuter avec PowerShell"**.
+
+4. L'installateur :
+   - installe Python si nécessaire (via `winget`)
+   - crée un environnement virtuel local
+   - installe toutes les dépendances
+   - crée un raccourci **AutoTranscript** sur votre bureau
+
+5. Double-cliquez sur le raccourci pour lancer l'application.
+
+> La première transcription télécharge le modèle Whisper choisi (une seule fois).
+
+### Linux
+
+1. Téléchargez et dézippez le projet, ou clonez-le :
+   ```bash
+   git clone https://github.com/NicolasMallent/autoTranscript.git
+   cd autoTranscript
+   ```
+
+2. Lancez l'installateur :
+   ```bash
+   chmod +x installer/install.sh
+   ./installer/install.sh
+   ```
+
+3. L'installateur :
+   - vérifie Python 3 et installe ffmpeg si absent
+   - crée un environnement virtuel local
+   - installe toutes les dépendances
+   - crée un lanceur `lancer.sh` et une entrée dans le menu applications
+
+4. Démarrez l'application :
+   ```bash
+   ./lancer.sh
+   ```
+
+---
+
+## Utilisation
+
+1. **Sélectionnez la source** : choisissez entre *Fichier unique* (audio ou vidéo) ou *Dossier* (tous les fichiers compatibles du dossier seront traités).
+
+2. **Choisissez le modèle IA** selon vos besoins :
+
+   | Modèle  | Taille  | Qualité | Vitesse |
+   |---------|---------|---------|---------|
+   | tiny    | 75 MB   | Basique | Très rapide |
+   | base    | 139 MB  | Correcte | Rapide |
+   | small   | 461 MB  | Bonne | Moyenne |
+   | medium  | 1.4 GB  | Très bonne | Lente |
+   | large   | 2.9 GB  | Excellente | Très lente |
+
+   > Le modèle est téléchargé automatiquement lors de la première utilisation, puis mis en cache localement.
+
+3. **Choisissez la langue** de transcription (Français, English, ou détection automatique).
+
+4. **Sélectionnez le(s) format(s) de sortie** souhaités.
+
+5. Cliquez sur **Transcrire**. Les fichiers résultats sont enregistrés **dans le même dossier** que la source, sous la forme :
+   - `nom_du_fichier_<modèle>.txt`
+   - `nom_du_fichier_<modèle>.json`
+
+---
+
+## Formats de sortie
+
+### `.txt` horodaté
+
+Texte découpé par segment avec les temps de début et de fin :
+
+```
+[00:00:00.000 --> 00:00:06.240] Dans le bouquin, non,
+il y a une partie sur la lumière.
+
+[00:00:06.500 --> 00:00:11.100] Exactement, c'est ce dont je voulais parler.
+```
+
+### `.json` (données brutes Whisper)
+
+Toutes les métadonnées retournées par Whisper : segments, scores de confiance, langue détectée, etc. Utile pour un traitement ultérieur par programme.
+
+---
+
+## Note RGPD
+
+AutoTranscript fonctionne **entièrement hors ligne**. Les fichiers audio/vidéo et les transcriptions ne quittent jamais votre ordinateur. Aucune connexion à un service tiers n'est établie pendant la transcription.
+
+---
+
+## Auteurs
+
+Ce projet a été initié et développé par :
+
+- **Cécile de Hosson** — UPCité, Laboratoire de Didactique André Revuz (LDAR)
+- **Sylviane Pompéï** — UPCité, Laboratoire de Didactique André Revuz (LDAR)
+- **Pierre Andrieu** — UPCité, Laboratoire de Didactique André Revuz (LDAR)
+
+Contributeur :
+
+- **Nicolas Mallent** — Ingénieur Recherche et Développement Robotique
+
+---
+
+## Dépôt
+
+[https://github.com/NicolasMallent/autoTranscript](https://github.com/NicolasMallent/autoTranscript)
+
+---
+
+## Licence
+
+Ce projet utilise [Whisper AI](https://github.com/openai/whisper) (MIT License, OpenAI).
 
 
-#### 1.2 Utiliser whisper pour la première fois
-
-- Créer un dossier de sauvegarde de vos transcriptions sur votre bureau ou à l’endroit que vous souhaitez et copier le chemin d’accès à ce dossier.
-- Lancer pycharm
-- Créer un nouveau projet pour toutes les transcriptions par whisper :
-    - Donner un nom rappelant sa fonction : « whisper », « transcrire », etc.
-    - Préciser la localisation du dossier de sauvegarde en collant le lien du chemin précédemment copié
-    - Vériﬁer que venv est coché
-- Clic droit sur le dossier `.venv > New > Python File`, nommez le fichier ainsi créé (le tutoriel utilisera le nom « main.py »).
-  - Copier le **contenu** d'autoTranscript/main.py téléchargé à la toute première étape de ce tutoriel (« Récupération du projet ») et collez-le dans le .venv/main.py que vous venez de créer
-- Dans le fichier .venv/main.py, si whisper est souligné en rouge :
-  - Ouvrir le terminal de l’environnement virtuel venv 
-  - Recopier et entrer : `pip install git+https://github.com/openai/whisper.git`
-> Il est possible que vous ayez un problème avec numpy, pour le régler, faites:  `pip install numpy<2`
-
-#### 1.3 Utiliser Whisper
-> Attention !
-> Le chemin et le nom des fichiers ne doivent pas comporter d'espaces, d'accents ou tout autre caractère spécial.  
-> Privilégiez des `_` ou des `-` pour remplacer les espaces.
-
-##### 1.3.1 Extraction du son d’une vidéo locale
-
-- Télécharger et installer [Audacity](https://www.audacityteam.org/download/windows/):
-    - Choisir : 64 bit installer (recommended).
-- Ouvrir Audacity.
-- Vériﬁer que ﬀmpeg est disponible (étape à ne réaliser qu’une seule fois) :
-    - Cliquer sur `Edition > Préférences > Bibliothèques`.
-    - Bibliothèque FFmpeg : cliquer sur Localiser... puis, si nécessaire, sur Téléchargement.
-- Glisser la vidéo sur l’écran d’Audacity.
-- `Fichier > exporter l’audio` : exporter en mp3.
-
-##### 1.3.2 Mise en route de Whisper
-
-- Ouvrir PyCharm, et le projet que vous avez créé dans Whisper.
-- Aller dans le dossier .venv (environnement virtuel), le sous-dossier du projet.
-- Ce script a besoin qu'on lui donne 2 paramètres d'entrées :
-  - Le chemin vers le dossier où sont stockés les enregistrements :
-      - Dans `Run > Edit Configurations`, remplissez le champ "Script Parameters" avec le chemin de votre dossier (par exemple "C:\Users\admin\Documents\audio")
-      - Cliquez sur le bouton `Apply` puis `OK`
-      - Pour récupérer le chemin du dossier : clic droit sur la barre du dossier contenant le fichier mp3, puis choisir "Copier l’adresse sous forme de texte".
-  - Ainsi que le modèle de vocabulaire (pour indiquer à la transcription le modèle de vocabulaire à utiliser) :
-      - "base" : petit, téléchargement immédiat (139 M)
-      - "medium" : moyen, téléchargement 20 minutes (1.42 G)
-      - "large" : grand, téléchargement 1 heure (2,88 G) > privilégier ce modèle pour une transcription de qualité
-- Exécuter main.py
-
-> Le téléchargement du modèle de vocabulaire ne se fait qu'une fois.
-
-![Une image descriptive](ressources/edit_config.png)
-
-#### 1.4 Récupération des fichiers transcrits
-
-Les fichiers ont pour nom « output_<nom_de_l_audio>_<modèle>.txt ».   
-Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
-
-### 2. Configurer et utiliser Whisper en ligne
-#### 2.1 Pour préparer le drive (à faire une seule fois)
-##### 2.1.1 Sources
+---
+---
+## Configurer et utiliser Whisper en ligne
+### Pour préparer le drive (à faire une seule fois)
+#### Sources
 - [article](https://kevinstratvert.com/2023/01/19/best-free-speech-to-text-ai-whisper-ai/)
 - [vidéo](https://www.youtube.com/watch?v=8SQV-B83tPU)
 
-##### 2.1.2 Installer Google Colaboratory 
+#### Installer Google Colaboratory 
 
 1. Aller sur [Google Drive](https://drive.google.com/) et créer un compte Google (gratuit), si vous n’en avez pas encore un.
 2. Sur le coin en haut à gauche, cliquer sur `New button > More > Connect more apps`.
@@ -119,7 +170,7 @@ Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
 6. Colaboratory a été installé.
 7. Cliquer sur le bouton `Done` et fermer la fenêtre “Connect more apps”.
 
-##### 2.1.3 Configurer Google Colaboratory 
+#### Configurer Google Colaboratory 
 
 1. Aller sur [Google Drive](https://drive.google.com/) et se connecter à son compte Google.
 2. Sur le coin en haut à gauche, cliquer sur `New button > More > Colaboratory`. Ceci ouvre Colaboratory.
@@ -128,7 +179,7 @@ Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
 5. Régler le `Hardware accelerator` sur `GPU`. Ceci permet d’utiliser la carte graphique, sur laquelle Whisper AI tourne le mieux. 
 > Noter l’adresse du Drive.
 
-#### 2.2 Commandes verbatim pour transcrire 
+### Commandes verbatim pour transcrire 
 
 1. Pour arriver sur mon Drive : https://colab.research.google.com/drive/.....
 2. Cliquer sur Transcribe_audio.ipynb
@@ -141,26 +192,26 @@ Ils sont enregistrés dans le même dossier que l’audio qui a été transcrit.
 !whisper "Titre.mp3" --model large --language fr
 ```
 
-#### 2.3 Fichiers résultats à sauvegarder
-##### 2.3.1 Fichier Titre.json
+### Fichiers résultats à sauvegarder
+#### Fichier Titre.json
 Format contenant du texte et des balises de temps en java
 
-##### 2.3.2 Fichier Titre.srt
+#### Fichier Titre.srt
 Format contenant le numéro de phrase, suivi des balises temporelles, suivi du texte (à ouvrir en UTF8 avec nomenclature pour les accents) :
 ```
 1 00 :00 :00,000 –> 00 :00 :06,000 Dans le bouquin, non, . . .
 ```
 
-##### 2.3.3 Fichier Titre.tsv
+#### Fichier Titre.tsv
 Format avec le début en ms, la ﬁn en ms, le texte sur une même ligne (ouvrir en UTF8), un peu comme du csv :
 ```
 0 6000 Dans le bouquin, non, . . .
 ```
 
-##### 2.3.4 Fichier Titre.txt
+#### Fichier Titre.txt
 Format ne contenant que le texte, découpé par des retours à la ligne (UTF8)
 
-##### 2.3.5 Fichier Titre.vtt
+#### Fichier Titre.vtt
 Format avec balises temporelles et texte à la ligne suivante (UTF8) :
 ```
 00 :00.000 –> 00 :06.000
