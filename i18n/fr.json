@@ -1,0 +1,49 @@
+{
+  "tab_transcription": "Transcription",
+  "tab_settings": "Paramètres",
+  "tab_about": "À propos",
+
+  "mode_file": "Fichier unique",
+  "mode_folder": "Dossier",
+  "select_file": "Choisir un fichier",
+  "select_folder": "Choisir un dossier",
+  "no_file_selected": "Aucun fichier sélectionné",
+  "no_folder_selected": "Aucun dossier sélectionné",
+  "file_dialog_title": "Sélectionner un fichier audio ou vidéo",
+  "folder_dialog_title": "Sélectionner un dossier",
+
+  "model_label": "Modèle IA",
+  "language_label": "Langue de transcription",
+  "output_format_label": "Format(s) de sortie",
+  "format_txt": ".txt horodaté",
+  "format_json": ".json (données brutes)",
+
+  "transcribe_button": "Transcrire",
+  "cancel_button": "Annuler",
+
+  "log_ready": "Prêt.",
+  "log_loading_model": "Chargement du modèle {model}...",
+  "log_extracting_audio": "Extraction audio depuis {file}...",
+  "log_processing_file": "Traitement : {file}",
+  "log_done_file": "Terminé : {file}",
+  "log_all_done": "Toutes les transcriptions sont terminées.",
+  "log_error": "Erreur : {error}",
+  "log_no_audio_found": "Aucun fichier audio ou vidéo trouvé dans le dossier.",
+
+  "settings_language_label": "Langue de l'interface",
+  "settings_language_fr": "Français",
+  "settings_language_en": "English",
+
+  "about_description": "Application de transcription automatique utilisant Whisper AI d'OpenAI.\nToutes les transcriptions sont réalisées localement, conformément au RGPD.",
+  "about_authors_title": "Auteurs",
+  "about_contributor_title": "Contributeur",
+  "about_repo": "Dépôt GitHub",
+
+  "whisper_lang_french": "Français",
+  "whisper_lang_english": "English",
+  "whisper_lang_auto": "Détection automatique",
+
+  "error_no_input": "Veuillez sélectionner un fichier ou un dossier.",
+  "error_no_format": "Veuillez sélectionner au moins un format de sortie.",
+  "error_ffmpeg": "ffmpeg est introuvable. Veuillez relancer l'installateur."
+}

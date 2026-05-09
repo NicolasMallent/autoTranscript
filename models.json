@@ -1,0 +1,32 @@
+[
+  {
+    "id": "tiny",
+    "size": "75 MB",
+    "fr": "Très rapide, peu précis",
+    "en": "Very fast, less accurate"
+  },
+  {
+    "id": "base",
+    "size": "139 MB",
+    "fr": "Rapide, précision correcte",
+    "en": "Fast, decent accuracy"
+  },
+  {
+    "id": "small",
+    "size": "461 MB",
+    "fr": "Bon compromis vitesse/qualité",
+    "en": "Good speed/quality balance"
+  },
+  {
+    "id": "medium",
+    "size": "1.4 GB",
+    "fr": "Bonne qualité",
+    "en": "Good quality"
+  },
+  {
+    "id": "large",
+    "size": "2.9 GB",
+    "fr": "Meilleure qualité (recommandé)",
+    "en": "Best quality (recommended)"
+  }
+]

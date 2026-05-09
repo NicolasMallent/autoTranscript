@@ -1,0 +1,2 @@
+# Placer ici le binaire ffmpeg (Linux x86_64) si vous souhaitez le bundler.
+# Sur Linux, l'installateur utilise ffmpeg du systeme (apt/dnf/pacman).
