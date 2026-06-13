@@ -26,6 +26,18 @@
   {
     "id": "large",
     "size": "2.9 GB",
+    "fr": "Bonne qualité",
+    "en": "Good quality"
+  },
+  {
+    "id": "large-v2",
+    "size": "2.9 GB",
+    "fr": "Très bonne qualité",
+    "en": "Very good quality"
+  },
+  {
+    "id": "large-v3",
+    "size": "2.9 GB",
     "fr": "Meilleure qualité (recommandé)",
     "en": "Best quality (recommended)"
   }
