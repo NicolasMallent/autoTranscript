@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+
+  # ─────────────────────────────────────────────
+  #  Windows — installateur .exe (Inno Setup)
+  # ─────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraire la version
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Telecharger Python embeddable 3.11
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip" `
+            -OutFile "python-embed.zip"
+          Expand-Archive -Path "python-embed.zip" `
+            -DestinationPath "installer\windows\python-embed" -Force
+
+      - name: Telecharger get-pip.py
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" `
+            -OutFile "installer\windows\get-pip.py"
+
+      - name: Telecharger ffmpeg Windows
+        shell: pwsh
+        run: |
+          Invoke-WebRequest `
+            -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" `
+            -OutFile "ffmpeg-win.zip"
+          Expand-Archive -Path "ffmpeg-win.zip" -DestinationPath "ffmpeg-tmp" -Force
+          New-Item -ItemType Directory -Force -Path "ffmpeg\windows" | Out-Null
+          Get-ChildItem -Recurse -Filter "ffmpeg.exe" "ffmpeg-tmp" |
+            Select-Object -First 1 |
+            Copy-Item -Destination "ffmpeg\windows\ffmpeg.exe"
+
+      - name: Creer le dossier dist
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
+      - name: Compiler avec Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc /DMyAppVersion="${{ steps.version.outputs.VERSION }}" "installer\windows\setup.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload artifact Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/AutoTranscript-Setup-Windows.exe
+
+  # ─────────────────────────────────────────────
+  #  Linux — paquet .deb
+  # ─────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraire la version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Construire le paquet .deb
+        run: |
+          chmod +x installer/linux/build-deb.sh
+          VERSION=${{ steps.version.outputs.VERSION }} ./installer/linux/build-deb.sh
+
+      - name: Upload artifact Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: dist/*.deb
+
+  # ─────────────────────────────────────────────
+  #  Créer la GitHub Release avec les deux fichiers
+  # ─────────────────────────────────────────────
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Telecharger tous les artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Creer la Release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -31,48 +31,46 @@ Toutes les transcriptions sont réalisées **entièrement en local** — aucune 
 
 ### Windows 11
 
-1. Téléchargez le projet depuis GitHub :  
-   `Code > Download ZIP`, puis dézippez le dossier.
+1. Rendez-vous sur la page [**Releases**](https://github.com/NicolasMallent/autoTranscript/releases/latest) du dépôt GitHub.
+2. Téléchargez **`AutoTranscript-Setup-Windows.exe`**.
+3. Double-cliquez sur le fichier téléchargé et suivez l'assistant d'installation.
 
-2. [ﬀmpeg](https://github.com/BtbN/FFmpeg-Builds/releases)  
-Dézippez **autoTranscript/ffmpeg/windows/ffmpeg-master-latest-win64-gpl-shared.zip** et renommer le "ffmpeg" puis copier/coller le dossier dans le dossier `C:\Program Files\` avec les droits d'admin. Une fois fait, vous devriez avoir `C:\Program Files\ffmpeg` qui contient les sous dossiers bin, doc, include, etc..
+L'installateur prend en charge automatiquement :
+- Python (version autonome, n'interfère pas avec votre système)
+- ffmpeg (inclus dans l'installateur)
+- Toutes les dépendances IA (~3 Go téléchargés lors de l'installation)
+- Un raccourci sur le Bureau et dans le Menu Démarrer
 
-3. Ouvrez le dossier `installer/`, faites un **clic droit** sur `install.ps1` et choisissez **"Exécuter avec PowerShell"**.
+> Aucun droit administrateur requis. Aucune configuration manuelle.
 
-4. L'installateur :
-   - installe Python si nécessaire (via `winget`)
-   - crée un environnement virtuel local
-   - installe toutes les dépendances
-   - crée un raccourci **AutoTranscript** sur votre bureau
+### Linux (Debian / Ubuntu)
 
-5. Double-cliquez sur le raccourci pour lancer l'application.
-
-> La première transcription télécharge le modèle Whisper choisi (une seule fois).
-
-### Linux
-
-1. Téléchargez et dézippez le projet, ou clonez-le :
+1. Rendez-vous sur la page [**Releases**](https://github.com/NicolasMallent/autoTranscript/releases/latest) du dépôt GitHub.
+2. Téléchargez **`autotranscript_*.deb`**.
+3. Installez le paquet :
    ```bash
-   git clone https://github.com/NicolasMallent/autoTranscript.git
-   cd autoTranscript
+   sudo apt install ./autotranscript_*.deb
    ```
 
-2. Lancez l'installateur :
+Le paquet installe automatiquement les dépendances système (`python3-venv`, `python3-tk`, `ffmpeg`) puis télécharge les dépendances IA (~3 Go).
+
+4. Lancez l'application depuis le menu applications ou en ligne de commande :
    ```bash
-   chmod +x installer/install.sh
-   ./installer/install.sh
+   autotranscript
    ```
 
-3. L'installateur :
-   - vérifie Python 3 et installe ffmpeg si absent
-   - crée un environnement virtuel local
-   - installe toutes les dépendances
-   - crée un lanceur `lancer.sh` et une entrée dans le menu applications
+<details>
+<summary>Installation manuelle (développeurs)</summary>
 
-4. Démarrez l'application :
-   ```bash
-   ./lancer.sh
-   ```
+```bash
+git clone https://github.com/NicolasMallent/autoTranscript.git
+cd autoTranscript
+chmod +x installer/install.sh
+./installer/install.sh
+# puis :
+./lancer.sh
+```
+</details>
 
 ---
 
@@ -152,68 +150,3 @@ Contributeur :
 Ce projet utilise [Whisper AI](https://github.com/openai/whisper) (MIT License, OpenAI).
 
 
----
----
-## Configurer et utiliser Whisper en ligne
-### Pour préparer le drive (à faire une seule fois)
-#### Sources
-- [article](https://kevinstratvert.com/2023/01/19/best-free-speech-to-text-ai-whisper-ai/)
-- [vidéo](https://www.youtube.com/watch?v=8SQV-B83tPU)
-
-#### Installer Google Colaboratory 
-
-1. Aller sur [Google Drive](https://drive.google.com/) et créer un compte Google (gratuit), si vous n’en avez pas encore un.
-2. Sur le coin en haut à gauche, cliquer sur `New button > More > Connect more apps`.
-3. En haut du dialogue, écrire dans la fenêtre de recherche Google Colaboratory et lancer la recherche.
-4. Choisir la première option : “Colaboratory”
-5. Cliquer sur le bouton Install, puis sur Continue et sur OK pour connecter Google Colaboratory à Google Drive.
-6. Colaboratory a été installé.
-7. Cliquer sur le bouton `Done` et fermer la fenêtre “Connect more apps”.
-
-#### Configurer Google Colaboratory 
-
-1. Aller sur [Google Drive](https://drive.google.com/) et se connecter à son compte Google.
-2. Sur le coin en haut à gauche, cliquer sur `New button > More > Colaboratory`. Ceci ouvre Colaboratory.
-3. Sur le coin en haut à gauche, donner un nom au fichier en sélectionnant Untitled.ipynb et en le renommant en quelque chose de plus parlant (p. ex. Transcribe_audio.ipynb).
-4. Cliquer sur le menu `Runtime` et sélectionner `Change runtime type` pour ouvrir le dialogue `Notebook settings`
-5. Régler le `Hardware accelerator` sur `GPU`. Ceci permet d’utiliser la carte graphique, sur laquelle Whisper AI tourne le mieux. 
-> Noter l’adresse du Drive.
-
-### Commandes verbatim pour transcrire 
-
-1. Pour arriver sur mon Drive : https://colab.research.google.com/drive/.....
-2. Cliquer sur Transcribe_audio.ipynb
-3. Glisser le fichier à traduire dans l’espace fichiers de ce dossier (icône de dossier sur la marge gauche)
-4. Pour chaque session d’utilisation, réinstaller whisper :
-
-```
-!pip install git+https://github.com/openai/whisper.git
-!sudo apt update && sudo apt install ffmpeg
-!whisper "Titre.mp3" --model large --language fr
-```
-
-### Fichiers résultats à sauvegarder
-#### Fichier Titre.json
-Format contenant du texte et des balises de temps en java
-
-#### Fichier Titre.srt
-Format contenant le numéro de phrase, suivi des balises temporelles, suivi du texte (à ouvrir en UTF8 avec nomenclature pour les accents) :
-```
-1 00 :00 :00,000 –> 00 :00 :06,000 Dans le bouquin, non, . . .
-```
-
-#### Fichier Titre.tsv
-Format avec le début en ms, la ﬁn en ms, le texte sur une même ligne (ouvrir en UTF8), un peu comme du csv :
-```
-0 6000 Dans le bouquin, non, . . .
-```
-
-#### Fichier Titre.txt
-Format ne contenant que le texte, découpé par des retours à la ligne (UTF8)
-
-#### Fichier Titre.vtt
-Format avec balises temporelles et texte à la ligne suivante (UTF8) :
-```
-00 :00.000 –> 00 :06.000
-Dans le bouquin, non, 
-```
