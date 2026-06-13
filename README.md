@@ -22,9 +22,6 @@ Toutes les transcriptions sont réalisées **entièrement en local** — aucune 
 
 **Aucun.** L'installateur prend en charge tout automatiquement.
 
-> Sur Windows 11, `winget` est requis (installé par défaut sur Windows 11).  
-> Sur Linux, `sudo` est nécessaire pour installer ffmpeg si absent.
-
 ---
 
 ## Installation
