@@ -16,6 +16,7 @@
   "language_label": "Transcription language",
   "output_format_label": "Output format(s)",
   "format_txt": ".txt with timestamps",
+  "format_srt": ".srt (subtitles with speakers)",
   "format_json": ".json (raw data)",
 
   "transcribe_button": "Transcribe",
@@ -34,14 +35,29 @@
   "settings_language_fr": "Français",
   "settings_language_en": "English",
 
-  "about_description": "Automatic transcription application using OpenAI's Whisper AI.\nAll transcriptions are processed locally, in compliance with GDPR.",
+  "about_description": "Automatic transcription of audio and video files with speaker identification.\nFully local processing — GDPR compliant.",
   "about_authors_title": "Authors",
   "about_contributor_title": "Contributor",
   "about_repo": "GitHub Repository",
+  "about_credits_title": "Credits",
+  "about_credits_body": "Speaker identification powered by pyannote.audio\n(Hervé Bredin et al., pyannoteAI — CC BY 4.0 license)\nhttps://github.com/pyannote/pyannote-audio\n\nSpeech transcription: WhisperX (Max Bain et al.) / Whisper AI (OpenAI)",
 
   "whisper_lang_french": "French",
   "whisper_lang_english": "English",
   "whisper_lang_auto": "Auto-detect",
+
+  "diarization_label": "Identify speakers",
+  "diarization_hint": "Downloads a model (~400 MB) on first use",
+  "speakers_label": "Number of speakers (if known):",
+  "speakers_min": "min",
+  "speakers_max": "max",
+
+  "log_diarization_model_connecting": "Connecting to model server...",
+  "log_diarization_model_dl": "Downloading diarization model: {done} / {total} MB",
+  "log_diarization_model_extracting": "Extracting model...",
+  "log_diarization_model_ready": "Diarization model ready.",
+  "log_aligning": "Aligning words: {file}",
+  "log_diarizing": "Identifying speakers: {file}",
 
   "error_no_input": "Please select a file or folder.",
   "error_no_format": "Please select at least one output format.",

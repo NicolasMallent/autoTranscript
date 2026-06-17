@@ -90,10 +90,41 @@ jobs:
           path: dist/*.deb
 
   # ─────────────────────────────────────────────
-  #  Créer la GitHub Release avec les deux fichiers
+  #  Modèle pyannote — téléchargé depuis HuggingFace
+  #  et packagé comme asset de release
+  #  Prérequis : secret HF_TOKEN dans le dépôt GitHub
+  #  (Settings > Secrets > Actions > New repository secret)
+  # ─────────────────────────────────────────────
+  package-pyannote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Telecharger et packager les modeles pyannote
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          mkdir -p dist
+          python scripts/download_pyannote.py
+
+      - name: Upload artifact pyannote
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyannote-model
+          path: dist/pyannote-community-1.zip
+
+  # ─────────────────────────────────────────────
+  #  Créer la GitHub Release avec les trois fichiers
   # ─────────────────────────────────────────────
   create-release:
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, package-pyannote]
     runs-on: ubuntu-latest
     steps:
       - name: Telecharger tous les artifacts

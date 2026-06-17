@@ -1,0 +1,4 @@
+whisperx
+
+# Nécessite aussi ffmpeg installé sur le système (pas un paquet pip) :
+# https://ffmpeg.org/download.html

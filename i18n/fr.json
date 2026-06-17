@@ -16,6 +16,7 @@
   "language_label": "Langue de transcription",
   "output_format_label": "Format(s) de sortie",
   "format_txt": ".txt horodaté",
+  "format_srt": ".srt (sous-titres avec locuteurs)",
   "format_json": ".json (données brutes)",
 
   "transcribe_button": "Transcrire",
@@ -34,14 +35,29 @@
   "settings_language_fr": "Français",
   "settings_language_en": "English",
 
-  "about_description": "Application de transcription automatique utilisant Whisper AI d'OpenAI.\nToutes les transcriptions sont réalisées localement, conformément au RGPD.",
+  "about_description": "Transcription automatique de fichiers audio et vidéo avec identification des locuteurs.\nTraitement entièrement local — conforme au RGPD.",
   "about_authors_title": "Auteurs",
   "about_contributor_title": "Contributeur",
   "about_repo": "Dépôt GitHub",
+  "about_credits_title": "Crédits",
+  "about_credits_body": "Identification des locuteurs assurée par pyannote.audio\n(Hervé Bredin et al., pyannoteAI — licence CC BY 4.0)\nhttps://github.com/pyannote/pyannote-audio\n\nTranscription vocale : WhisperX (Max Bain et al.) / Whisper AI (OpenAI)",
 
   "whisper_lang_french": "Français",
   "whisper_lang_english": "English",
   "whisper_lang_auto": "Détection automatique",
+
+  "diarization_label": "Identifier les locuteurs",
+  "diarization_hint": "Télécharge un modèle (~400 Mo) au premier usage",
+  "speakers_label": "Nombre de locuteurs (si connu) :",
+  "speakers_min": "min",
+  "speakers_max": "max",
+
+  "log_diarization_model_connecting": "Connexion au serveur de modèles...",
+  "log_diarization_model_dl": "Téléchargement du modèle de diarisation : {done} / {total} Mo",
+  "log_diarization_model_extracting": "Extraction du modèle...",
+  "log_diarization_model_ready": "Modèle de diarisation prêt.",
+  "log_aligning": "Alignement des mots : {file}",
+  "log_diarizing": "Identification des locuteurs : {file}",
 
   "error_no_input": "Veuillez sélectionner un fichier ou un dossier.",
   "error_no_format": "Veuillez sélectionner au moins un format de sortie.",

@@ -65,7 +65,7 @@ class App(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.title("AutoTranscript")
-        self.minsize(620, 540)
+        self.minsize(640, 600)
         self.resizable(True, True)
 
         self._build_ui()
@@ -85,7 +85,6 @@ class App(ctk.CTk):
 
     def _build_transcription_tab(self, parent):
         parent.columnconfigure(1, weight=1)
-
         row = 0
 
         # --- Mode file/folder ---
@@ -96,19 +95,13 @@ class App(ctk.CTk):
         mode_frame = ctk.CTkFrame(parent, fg_color="transparent")
         mode_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=12)
         self._rb_file = ctk.CTkRadioButton(
-            mode_frame,
-            text=i18n_mod.t("mode_file"),
-            variable=self._mode_var,
-            value="file",
-            command=self._on_mode_change,
+            mode_frame, text=i18n_mod.t("mode_file"),
+            variable=self._mode_var, value="file", command=self._on_mode_change,
         )
         self._rb_file.pack(side="left", padx=(0, 16))
         self._rb_folder = ctk.CTkRadioButton(
-            mode_frame,
-            text=i18n_mod.t("mode_folder"),
-            variable=self._mode_var,
-            value="folder",
-            command=self._on_mode_change,
+            mode_frame, text=i18n_mod.t("mode_folder"),
+            variable=self._mode_var, value="folder", command=self._on_mode_change,
         )
         self._rb_folder.pack(side="left")
         row += 1
@@ -117,12 +110,10 @@ class App(ctk.CTk):
         path_frame = ctk.CTkFrame(parent, fg_color="transparent")
         path_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=12, pady=(6, 0))
         path_frame.columnconfigure(0, weight=1)
-
         self._path_entry = ctk.CTkEntry(path_frame, textvariable=self._selected_path, state="readonly")
         self._path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-
         self._select_btn = ctk.CTkButton(
-            path_frame, text=i18n_mod.t("select_file"), width=140, command=self._on_select
+            path_frame, text=i18n_mod.t("select_file"), width=140, command=self._on_select,
         )
         self._select_btn.grid(row=0, column=1)
         row += 1
@@ -138,10 +129,9 @@ class App(ctk.CTk):
         default_model = self._config.get("last_model", "base")
         default_idx = model_ids.index(default_model) if default_model in model_ids else 1
         self._model_var = tk.StringVar(value=model_labels[default_idx])
-        self._model_combo = ctk.CTkComboBox(
-            parent, values=model_labels, variable=self._model_var, state="readonly", width=380
-        )
-        self._model_combo.grid(row=row, column=1, columnspan=2, sticky="w", padx=12, pady=(14, 0))
+        ctk.CTkComboBox(
+            parent, values=model_labels, variable=self._model_var, state="readonly", width=380,
+        ).grid(row=row, column=1, columnspan=2, sticky="w", padx=12, pady=(14, 0))
         row += 1
 
         # --- Whisper language ---
@@ -151,10 +141,9 @@ class App(ctk.CTk):
         lang_keys = list(WHISPER_LANGUAGES.keys())
         lang_labels = [i18n_mod.t(k) for k in lang_keys]
         self._whisper_lang_var = tk.StringVar(value=lang_labels[0])
-        self._lang_combo = ctk.CTkComboBox(
-            parent, values=lang_labels, variable=self._whisper_lang_var, state="readonly", width=220
-        )
-        self._lang_combo.grid(row=row, column=1, sticky="w", padx=12, pady=(10, 0))
+        ctk.CTkComboBox(
+            parent, values=lang_labels, variable=self._whisper_lang_var, state="readonly", width=220,
+        ).grid(row=row, column=1, sticky="w", padx=12, pady=(10, 0))
         row += 1
 
         # --- Output formats ---
@@ -164,30 +153,65 @@ class App(ctk.CTk):
         fmt_frame = ctk.CTkFrame(parent, fg_color="transparent")
         fmt_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=12, pady=(10, 0))
         self._fmt_txt = tk.BooleanVar(value=True)
+        self._fmt_srt = tk.BooleanVar(value=True)
         self._fmt_json = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(fmt_frame, text=i18n_mod.t("format_txt"), variable=self._fmt_txt).pack(
-            side="left", padx=(0, 16)
+            side="left", padx=(0, 12)
         )
+        self._srt_checkbox = ctk.CTkCheckBox(
+            fmt_frame, text=i18n_mod.t("format_srt"), variable=self._fmt_srt
+        )
+        self._srt_checkbox.pack(side="left", padx=(0, 12))
         ctk.CTkCheckBox(fmt_frame, text=i18n_mod.t("format_json"), variable=self._fmt_json).pack(
             side="left"
         )
         row += 1
 
-        # --- Transcribe button ---
+        # --- Diarization ---
+        separator = ctk.CTkFrame(parent, height=1, fg_color="gray50")
+        separator.grid(row=row, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 0))
+        row += 1
+
+        diarize_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        diarize_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 0))
+        self._diarize_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            diarize_frame, text=i18n_mod.t("diarization_label"),
+            variable=self._diarize_var, command=self._on_diarize_toggle,
+        ).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(
+            diarize_frame, text=i18n_mod.t("diarization_hint"),
+            font=ctk.CTkFont(size=11), text_color="gray60",
+        ).pack(side="left")
+        row += 1
+
+        # --- Min / max speakers ---
+        self._speakers_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._speakers_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=28, pady=(6, 0))
+        ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_label")).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_min")).pack(side="left")
+        self._min_speakers_var = tk.StringVar(value="")
+        ctk.CTkEntry(self._speakers_frame, textvariable=self._min_speakers_var, width=48).pack(
+            side="left", padx=(4, 12)
+        )
+        ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_max")).pack(side="left")
+        self._max_speakers_var = tk.StringVar(value="")
+        ctk.CTkEntry(self._speakers_frame, textvariable=self._max_speakers_var, width=48).pack(
+            side="left", padx=(4, 0)
+        )
+        row += 1
+
+        # --- Buttons ---
         btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_frame.grid(row=row, column=0, columnspan=3, pady=(16, 4))
+        btn_frame.grid(row=row, column=0, columnspan=3, pady=(14, 4))
         self._transcribe_btn = ctk.CTkButton(
-            btn_frame, text=i18n_mod.t("transcribe_button"), width=160, command=self._on_transcribe
+            btn_frame, text=i18n_mod.t("transcribe_button"), width=160, command=self._on_transcribe,
         )
         self._transcribe_btn.pack(side="left", padx=8)
         self._cancel_btn = ctk.CTkButton(
-            btn_frame,
-            text=i18n_mod.t("cancel_button"),
-            width=120,
-            fg_color="gray40",
-            hover_color="gray30",
-            command=self._on_cancel,
-            state="disabled",
+            btn_frame, text=i18n_mod.t("cancel_button"), width=120,
+            fg_color="gray40", hover_color="gray30",
+            command=self._on_cancel, state="disabled",
         )
         self._cancel_btn.pack(side="left", padx=8)
         row += 1
@@ -198,17 +222,15 @@ class App(ctk.CTk):
         self._progress.grid(row=row, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 4))
         row += 1
 
-        # --- Log area ---
-        self._log = ctk.CTkTextbox(parent, height=120, state="disabled", wrap="word")
+        # --- Log ---
+        self._log = ctk.CTkTextbox(parent, height=110, state="disabled", wrap="word")
         self._log.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=12, pady=(0, 8))
         parent.rowconfigure(row, weight=1)
-        row += 1
 
         self._log_append(i18n_mod.t("log_ready"))
 
     def _build_settings_tab(self, parent):
         parent.columnconfigure(1, weight=1)
-
         ctk.CTkLabel(parent, text=i18n_mod.t("settings_language_label")).grid(
             row=0, column=0, sticky="w", padx=16, pady=(20, 0)
         )
@@ -219,47 +241,56 @@ class App(ctk.CTk):
         )
         lang_options = [i18n_mod.t("settings_language_fr"), i18n_mod.t("settings_language_en")]
         ctk.CTkComboBox(
-            parent,
-            values=lang_options,
-            variable=self._ui_lang_var,
-            state="readonly",
-            width=160,
-            command=self._on_lang_change,
+            parent, values=lang_options, variable=self._ui_lang_var,
+            state="readonly", width=160, command=self._on_lang_change,
         ).grid(row=0, column=1, sticky="w", padx=16, pady=(20, 0))
 
     def _build_about_tab(self, parent):
         frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=16, pady=12)
 
-        ctk.CTkLabel(frame, text="AutoTranscript", font=ctk.CTkFont(size=22, weight="bold")).pack(
-            anchor="w", pady=(0, 2)
-        )
+        ctk.CTkLabel(frame, text="AutoTranscript", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", pady=(0, 2))
         ctk.CTkLabel(frame, text=f"v{_VERSION}", font=ctk.CTkFont(size=12)).pack(anchor="w")
-        ctk.CTkLabel(
-            frame, text=i18n_mod.t("about_description"), wraplength=500, justify="left"
-        ).pack(anchor="w", pady=(12, 0))
+        ctk.CTkLabel(frame, text=i18n_mod.t("about_description"), wraplength=500, justify="left").pack(anchor="w", pady=(12, 0))
 
-        ctk.CTkLabel(
-            frame, text=i18n_mod.t("about_authors_title"), font=ctk.CTkFont(weight="bold")
-        ).pack(anchor="w", pady=(16, 4))
+        ctk.CTkLabel(frame, text=i18n_mod.t("about_authors_title"), font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(16, 4))
         for author in _AUTHORS:
             ctk.CTkLabel(frame, text=f"• {author}").pack(anchor="w")
 
-        ctk.CTkLabel(
-            frame, text=i18n_mod.t("about_contributor_title"), font=ctk.CTkFont(weight="bold")
-        ).pack(anchor="w", pady=(12, 4))
+        ctk.CTkLabel(frame, text=i18n_mod.t("about_contributor_title"), font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(12, 4))
         ctk.CTkLabel(frame, text=f"• {_CONTRIBUTOR}").pack(anchor="w")
 
-        ctk.CTkLabel(
-            frame, text=i18n_mod.t("about_repo"), font=ctk.CTkFont(weight="bold")
-        ).pack(anchor="w", pady=(16, 4))
-        link = ctk.CTkLabel(
-            frame, text=_REPO_URL, text_color=("#1a73e8", "#4da6ff"), cursor="hand2"
-        )
+        ctk.CTkLabel(frame, text=i18n_mod.t("about_repo"), font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(16, 4))
+        link = ctk.CTkLabel(frame, text=_REPO_URL, text_color=("#1a73e8", "#4da6ff"), cursor="hand2")
         link.pack(anchor="w")
         link.bind("<Button-1>", lambda _: webbrowser.open(_REPO_URL))
 
-    # --- helpers ---
+        # Crédits — requis par la licence CC BY 4.0 de pyannote.audio
+        ctk.CTkLabel(
+            frame, text=i18n_mod.t("about_credits_title"), font=ctk.CTkFont(weight="bold")
+        ).pack(anchor="w", pady=(20, 4))
+        ctk.CTkLabel(
+            frame,
+            text=i18n_mod.t("about_credits_body"),
+            wraplength=500,
+            justify="left",
+            font=ctk.CTkFont(size=11),
+            text_color="gray70",
+        ).pack(anchor="w")
+        pyannote_link = ctk.CTkLabel(
+            frame,
+            text="https://github.com/pyannote/pyannote-audio",
+            text_color=("#1a73e8", "#4da6ff"),
+            cursor="hand2",
+            font=ctk.CTkFont(size=11),
+        )
+        pyannote_link.pack(anchor="w", pady=(4, 0))
+        pyannote_link.bind(
+            "<Button-1>",
+            lambda _: webbrowser.open("https://github.com/pyannote/pyannote-audio"),
+        )
+
+    # ── helpers ──────────────────────────────────────────────────────────────
 
     def _log_append(self, message: str) -> None:
         self._log.configure(state="normal")
@@ -269,17 +300,26 @@ class App(ctk.CTk):
 
     def _on_mode_change(self) -> None:
         mode = self._mode_var.get()
-        self._select_btn.configure(
-            text=i18n_mod.t("select_file" if mode == "file" else "select_folder")
-        )
+        self._select_btn.configure(text=i18n_mod.t("select_file" if mode == "file" else "select_folder"))
         self._selected_path.set("")
+
+    def _on_diarize_toggle(self) -> None:
+        state = "normal" if self._diarize_var.get() else "disabled"
+        for widget in self._speakers_frame.winfo_children():
+            try:
+                widget.configure(state=state)
+            except Exception:
+                pass
+        self._srt_checkbox.configure(state=state)
+        if not self._diarize_var.get():
+            self._fmt_srt.set(False)
 
     def _on_select(self) -> None:
         if self._mode_var.get() == "file":
-            audio_types = " ".join(f"*{e}" for e in sorted({".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".mp4", ".mkv", ".avi", ".mov", ".webm"}))
+            exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
             path = filedialog.askopenfilename(
                 title=i18n_mod.t("file_dialog_title"),
-                filetypes=[("Audio / Vidéo", audio_types), ("Tous les fichiers", "*.*")],
+                filetypes=[("Audio / Vidéo", exts), ("Tous les fichiers", "*.*")],
             )
         else:
             path = filedialog.askdirectory(title=i18n_mod.t("folder_dialog_title"))
@@ -289,8 +329,7 @@ class App(ctk.CTk):
             _save_config(self._config)
 
     def _selected_model_id(self) -> str:
-        label = self._model_var.get()
-        return label.split()[0]
+        return self._model_var.get().split()[0]
 
     def _selected_whisper_lang(self) -> str:
         label = self._whisper_lang_var.get()
@@ -303,9 +342,20 @@ class App(ctk.CTk):
         formats = []
         if self._fmt_txt.get():
             formats.append("txt")
+        if self._fmt_srt.get():
+            formats.append("srt")
         if self._fmt_json.get():
             formats.append("json")
         return formats
+
+    def _selected_speakers(self) -> tuple[int | None, int | None]:
+        def _parse(v: str) -> int | None:
+            try:
+                n = int(v.strip())
+                return n if n > 0 else None
+            except ValueError:
+                return None
+        return _parse(self._min_speakers_var.get()), _parse(self._max_speakers_var.get())
 
     def _on_transcribe(self) -> None:
         path = self._selected_path.get()
@@ -326,13 +376,14 @@ class App(ctk.CTk):
         self._cancel_btn.configure(state="normal")
         self._progress.set(0)
 
+        diarize = self._diarize_var.get()
+        min_sp, max_sp = self._selected_speakers()
+
         def _run():
             try:
                 self._transcriber.transcribe(
-                    path,
-                    model_id,
-                    self._selected_whisper_lang(),
-                    formats,
+                    path, model_id, self._selected_whisper_lang(),
+                    formats, diarize, min_sp, max_sp,
                     lambda msg, pct: self._queue.put((msg, pct)),
                 )
             except Exception as exc:
@@ -366,24 +417,37 @@ class App(ctk.CTk):
                     self._transcribe_btn.configure(state="normal")
                     self._cancel_btn.configure(state="disabled")
                 elif msg.startswith("loading_model:"):
-                    model = msg.split(":", 1)[1]
-                    self._log_append(i18n_mod.t("log_loading_model", model=model))
+                    self._log_append(i18n_mod.t("log_loading_model", model=msg.split(":", 1)[1]))
                 elif msg.startswith("processing_file:"):
-                    fname = msg.split(":", 1)[1]
-                    self._log_append(i18n_mod.t("log_processing_file", file=fname))
+                    self._log_append(i18n_mod.t("log_processing_file", file=msg.split(":", 1)[1]))
                 elif msg.startswith("extracting_audio:"):
-                    fname = msg.split(":", 1)[1]
-                    self._log_append(i18n_mod.t("log_extracting_audio", file=fname))
+                    self._log_append(i18n_mod.t("log_extracting_audio", file=msg.split(":", 1)[1]))
+                elif msg.startswith("aligning:"):
+                    self._log_append(i18n_mod.t("log_aligning", file=msg.split(":", 1)[1]))
+                elif msg.startswith("diarizing:"):
+                    self._log_append(i18n_mod.t("log_diarizing", file=msg.split(":", 1)[1]))
+                elif msg == "diarization_model_connecting":
+                    self._log_append(i18n_mod.t("log_diarization_model_connecting"))
+                elif msg.startswith("diarization_model_dl:"):
+                    parts = msg.split(":", 1)[1].split("/")
+                    self._log.configure(state="normal")
+                    # Mise à jour de la dernière ligne plutôt qu'ajout
+                    self._log.delete("end-2l", "end-1c")
+                    self._log.insert("end", i18n_mod.t("log_diarization_model_dl", done=parts[0], total=parts[1]) + "\n")
+                    self._log.see("end")
+                    self._log.configure(state="disabled")
+                elif msg == "diarization_model_extracting":
+                    self._log_append(i18n_mod.t("log_diarization_model_extracting"))
+                elif msg in ("diarization_model_ready", "diarization_model_cached"):
+                    self._log_append(i18n_mod.t("log_diarization_model_ready"))
                 elif msg.startswith("done_file:"):
-                    fname = msg.split(":", 1)[1]
-                    self._log_append(i18n_mod.t("log_done_file", file=fname))
+                    self._log_append(i18n_mod.t("log_done_file", file=msg.split(":", 1)[1]))
                 elif msg == "all_done":
                     self._log_append(i18n_mod.t("log_all_done"))
                 elif msg == "no_audio_found":
                     self._log_append(i18n_mod.t("log_no_audio_found"))
                 elif msg.startswith("error:"):
-                    err = msg.split(":", 1)[1]
-                    self._log_append(i18n_mod.t("log_error", error=err))
+                    self._log_append(i18n_mod.t("log_error", error=msg.split(":", 1)[1]))
                 self._progress.set(pct)
         except queue.Empty:
             pass
