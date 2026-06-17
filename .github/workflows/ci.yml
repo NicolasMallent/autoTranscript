@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+    tags-ignore:
+      - 'v*.*.*'
+  pull_request:
+
+jobs:
+
+  # ─────────────────────────────────────────────
+  #  Windows — vérifie que le .exe se compile
+  # ─────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Telecharger Python embeddable 3.11
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip" `
+            -OutFile "python-embed.zip"
+          Expand-Archive -Path "python-embed.zip" `
+            -DestinationPath "installer\windows\python-embed" -Force
+
+      - name: Telecharger get-pip.py
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" `
+            -OutFile "installer\windows\get-pip.py"
+
+      - name: Telecharger ffmpeg Windows
+        shell: pwsh
+        run: |
+          Invoke-WebRequest `
+            -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" `
+            -OutFile "ffmpeg-win.zip"
+          Expand-Archive -Path "ffmpeg-win.zip" -DestinationPath "ffmpeg-tmp" -Force
+          New-Item -ItemType Directory -Force -Path "ffmpeg\windows" | Out-Null
+          Get-ChildItem -Recurse -Filter "ffmpeg.exe" "ffmpeg-tmp" |
+            Select-Object -First 1 |
+            Copy-Item -Destination "ffmpeg\windows\ffmpeg.exe"
+
+      - name: Creer le dossier dist
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
+      - name: Compiler avec Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc /DMyAppVersion="0.0.0-ci" "installer\windows\setup.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verifier l installateur Windows
+        shell: pwsh
+        run: |
+          $exe = "dist\AutoTranscript-Setup-Windows.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Installateur manquant : $exe"; exit 1 }
+          $size = (Get-Item $exe).Length
+          if ($size -lt 1MB) { Write-Error "Installateur trop petit ($size octets)"; exit 1 }
+          Write-Host "OK : $exe ($([math]::Round($size/1MB, 1)) Mo)"
+
+  # ─────────────────────────────────────────────
+  #  Linux — vérifie que le .deb se compile et s'installe
+  # ─────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire le paquet .deb
+        run: |
+          chmod +x installer/linux/build-deb.sh
+          VERSION=0.0.0-ci ./installer/linux/build-deb.sh
+
+      - name: Verifier l installation du paquet
+        run: |
+          sudo dpkg --unpack ./dist/*.deb
+          sudo apt-get install -y python3-tk --quiet
+          pip install customtkinter --quiet
+          python3 /opt/autotranscript/app/main.py --check
