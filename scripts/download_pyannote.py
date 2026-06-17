@@ -9,11 +9,13 @@ Nécessite : pip install huggingface_hub
 """
 import os
 import sys
+import time
 import zipfile
 from pathlib import Path
 
 try:
     from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import HfHubHTTPError
 except ImportError:
     print("ERREUR : pip install huggingface_hub", file=sys.stderr)
     sys.exit(1)
@@ -23,7 +25,6 @@ if not TOKEN:
     print("ERREUR : variable d'environnement HF_TOKEN manquante.", file=sys.stderr)
     sys.exit(1)
 
-# Dossier de sortie (structure hub cache de HuggingFace)
 CACHE_DIR = Path("pyannote-community-1") / "hub"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -33,16 +34,27 @@ MODELS = [
     "pyannote/wespeaker-voxceleb-resnet34-LM",
 ]
 
+MAX_RETRIES = 5
+
 for model_id in MODELS:
     print(f"→ Téléchargement de {model_id}...")
-    snapshot_download(
-        repo_id=model_id,
-        token=TOKEN,
-        cache_dir=CACHE_DIR,
-        # Exclure les formats alternatifs lourds inutiles
-        ignore_patterns=["*.h5", "*.msgpack", "flax_model*", "tf_model*", "rust_model*"],
-    )
-    print(f"  ✓ {model_id}")
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            snapshot_download(
+                repo_id=model_id,
+                token=TOKEN,
+                cache_dir=CACHE_DIR,
+                ignore_patterns=["*.h5", "*.msgpack", "flax_model*", "tf_model*", "rust_model*"],
+            )
+            print(f"  ✓ {model_id}")
+            break
+        except HfHubHTTPError as e:
+            if "429" in str(e) and attempt < MAX_RETRIES:
+                wait = 30 * attempt
+                print(f"  Rate limit (429), attente {wait}s avant tentative {attempt + 1}/{MAX_RETRIES}...")
+                time.sleep(wait)
+            else:
+                raise
 
 # Création du zip
 zip_path = Path("dist/pyannote-community-1.zip")
