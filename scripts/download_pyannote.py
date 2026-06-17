@@ -15,7 +15,6 @@ from pathlib import Path
 
 try:
     from huggingface_hub import snapshot_download
-    from huggingface_hub.errors import HfHubHTTPError
 except ImportError:
     print("ERREUR : pip install huggingface_hub", file=sys.stderr)
     sys.exit(1)
@@ -34,7 +33,14 @@ MODELS = [
     "pyannote/wespeaker-voxceleb-resnet34-LM",
 ]
 
-MAX_RETRIES = 5
+MAX_RETRIES = 6
+# Délais croissants : 60s, 120s, 180s, 240s, 300s
+WAIT_SECONDS = [60, 120, 180, 240, 300]
+
+
+def is_rate_limit(exc: Exception) -> bool:
+    return "429" in str(exc)
+
 
 for model_id in MODELS:
     print(f"→ Téléchargement de {model_id}...")
@@ -48,13 +54,18 @@ for model_id in MODELS:
             )
             print(f"  ✓ {model_id}")
             break
-        except HfHubHTTPError as e:
-            if "429" in str(e) and attempt < MAX_RETRIES:
-                wait = 30 * attempt
-                print(f"  Rate limit (429), attente {wait}s avant tentative {attempt + 1}/{MAX_RETRIES}...")
+        except Exception as e:
+            if is_rate_limit(e) and attempt < MAX_RETRIES:
+                wait = WAIT_SECONDS[min(attempt - 1, len(WAIT_SECONDS) - 1)]
+                print(f"  Rate limit (429) — attente {wait}s avant tentative {attempt + 1}/{MAX_RETRIES}...")
                 time.sleep(wait)
             else:
                 raise
+
+    # Pause entre les modèles pour éviter le rate limit
+    if model_id != MODELS[-1]:
+        print("  Pause 30s avant le modèle suivant...")
+        time.sleep(30)
 
 # Création du zip
 zip_path = Path("dist/pyannote-community-1.zip")
