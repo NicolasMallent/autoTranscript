@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 import i18n as i18n_mod
-from transcriber import Transcriber, WHISPERX_AVAILABLE
+from transcriber import Transcriber, WHISPERX_AVAILABLE, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".autotranscript", "config.json")
@@ -188,17 +188,18 @@ class App(ctk.CTk):
         row += 1
 
         # --- Min / max speakers ---
+        _sp_state = "normal" if WHISPERX_AVAILABLE else "disabled"
         self._speakers_frame = ctk.CTkFrame(parent, fg_color="transparent")
         self._speakers_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=28, pady=(6, 0))
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_label")).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_min")).pack(side="left")
         self._min_speakers_var = tk.StringVar(value="")
-        ctk.CTkEntry(self._speakers_frame, textvariable=self._min_speakers_var, width=48).pack(
+        ctk.CTkEntry(self._speakers_frame, textvariable=self._min_speakers_var, width=48, state=_sp_state).pack(
             side="left", padx=(4, 12)
         )
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_max")).pack(side="left")
         self._max_speakers_var = tk.StringVar(value="")
-        ctk.CTkEntry(self._speakers_frame, textvariable=self._max_speakers_var, width=48).pack(
+        ctk.CTkEntry(self._speakers_frame, textvariable=self._max_speakers_var, width=48, state=_sp_state).pack(
             side="left", padx=(4, 0)
         )
         row += 1
