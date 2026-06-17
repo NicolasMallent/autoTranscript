@@ -48,6 +48,7 @@
 
   "diarization_label": "Identifier les locuteurs",
   "diarization_hint": "Télécharge un modèle (~400 Mo) au premier usage",
+  "diarization_unavailable": "Indisponible (nécessite Python 3.10–3.13)",
   "speakers_label": "Nombre de locuteurs (si connu) :",
   "speakers_min": "min",
   "speakers_max": "max",

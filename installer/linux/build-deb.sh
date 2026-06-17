@@ -32,7 +32,7 @@ Package: $PACKAGE
 Version: $VERSION
 Architecture: $ARCH
 Maintainer: Nicolas Mallent <nicolas.mallent@magellium.fr>
-Depends: python3 (>= 3.9), python3-venv, python3-tk, ffmpeg
+Depends: python3-venv, python3-tk, ffmpeg
 Section: utils
 Priority: optional
 Homepage: https://github.com/NicolasMallent/autoTranscript
@@ -49,12 +49,24 @@ set -e
 INSTALL_DIR=/opt/autotranscript
 VENV_DIR=$INSTALL_DIR/.venv
 
-echo "AutoTranscript : installation des dependances Python..."
-echo "(telechargement de ~3 Go, cela peut prendre plusieurs minutes)"
-
+echo "AutoTranscript : creation de l'environnement Python..."
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-"$VENV_DIR/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
+
+echo "AutoTranscript : installation des dependances IA..."
+echo "(telechargement de ~3 Go, cela peut prendre plusieurs minutes)"
+
+# Tente whisperx (Python <3.14, identification des locuteurs disponible).
+# Si incompatible (Python 3.14+), repli sur openai-whisper (transcription seule).
+if "$VENV_DIR/bin/python" -m pip install whisperx 2>/dev/null; then
+    echo "AutoTranscript : whisperx installe (toutes les fonctionnalites disponibles)."
+else
+    echo "AutoTranscript : whisperx incompatible avec cette version Python."
+    echo "  Installation de openai-whisper (transcription sans identification des locuteurs)."
+    "$VENV_DIR/bin/python" -m pip install openai-whisper
+fi
+
+"$VENV_DIR/bin/python" -m pip install customtkinter --quiet
 
 echo "AutoTranscript : installation terminee."
 POSTINST

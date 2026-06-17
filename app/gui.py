@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 import i18n as i18n_mod
-from transcriber import Transcriber
+from transcriber import Transcriber, WHISPERX_AVAILABLE
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".autotranscript", "config.json")
@@ -174,13 +174,15 @@ class App(ctk.CTk):
 
         diarize_frame = ctk.CTkFrame(parent, fg_color="transparent")
         diarize_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 0))
-        self._diarize_var = tk.BooleanVar(value=True)
+        self._diarize_var = tk.BooleanVar(value=WHISPERX_AVAILABLE)
         ctk.CTkCheckBox(
             diarize_frame, text=i18n_mod.t("diarization_label"),
             variable=self._diarize_var, command=self._on_diarize_toggle,
+            state="normal" if WHISPERX_AVAILABLE else "disabled",
         ).pack(side="left", padx=(0, 12))
+        hint_text = i18n_mod.t("diarization_hint") if WHISPERX_AVAILABLE else i18n_mod.t("diarization_unavailable")
         ctk.CTkLabel(
-            diarize_frame, text=i18n_mod.t("diarization_hint"),
+            diarize_frame, text=hint_text,
             font=ctk.CTkFont(size=11), text_color="gray60",
         ).pack(side="left")
         row += 1
@@ -226,6 +228,9 @@ class App(ctk.CTk):
         self._log = ctk.CTkTextbox(parent, height=110, state="disabled", wrap="word")
         self._log.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=12, pady=(0, 8))
         parent.rowconfigure(row, weight=1)
+
+        if not WHISPERX_AVAILABLE:
+            self._on_diarize_toggle()
 
         self._log_append(i18n_mod.t("log_ready"))
 
@@ -310,9 +315,6 @@ class App(ctk.CTk):
                 widget.configure(state=state)
             except Exception:
                 pass
-        self._srt_checkbox.configure(state=state)
-        if not self._diarize_var.get():
-            self._fmt_srt.set(False)
 
     def _on_select(self) -> None:
         if self._mode_var.get() == "file":

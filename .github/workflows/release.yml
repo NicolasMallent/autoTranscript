@@ -60,6 +60,15 @@ jobs:
           & $iscc /DMyAppVersion="${{ steps.version.outputs.VERSION }}" "installer\windows\setup.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verifier l installateur Windows
+        shell: pwsh
+        run: |
+          $exe = "dist\AutoTranscript-Setup-Windows.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Installateur manquant : $exe"; exit 1 }
+          $size = (Get-Item $exe).Length
+          if ($size -lt 1MB) { Write-Error "Installateur trop petit ($size octets)"; exit 1 }
+          Write-Host "OK : $exe ($([math]::Round($size/1MB, 1)) Mo)"
+
       - name: Upload artifact Windows
         uses: actions/upload-artifact@v4
         with:
@@ -82,6 +91,14 @@ jobs:
         run: |
           chmod +x installer/linux/build-deb.sh
           VERSION=${{ steps.version.outputs.VERSION }} ./installer/linux/build-deb.sh
+
+      - name: Verifier l installation du paquet
+        run: |
+          # dpkg --unpack installe les fichiers sans executer le postinst (evite 3 Go de telechargement)
+          sudo dpkg --unpack ./dist/*.deb
+          # Installe uniquement la dependance GUI pour le smoke test
+          pip install customtkinter --quiet
+          python3 /opt/autotranscript/app/main.py --check
 
       - name: Upload artifact Linux
         uses: actions/upload-artifact@v4

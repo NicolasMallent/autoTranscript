@@ -12,6 +12,13 @@ ALL_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+try:
+    import whisperx as _wx_probe
+    del _wx_probe
+    WHISPERX_AVAILABLE = True
+except Exception:
+    WHISPERX_AVAILABLE = False
+
 
 def _find_ffmpeg() -> str:
     system = platform.system().lower()
@@ -87,7 +94,6 @@ def _write_json(data: dict | list, output_path: str) -> None:
 
 
 def _rename_speakers(raw_segments: list) -> list:
-    """Traduit SPEAKER_00 → Locuteur 1 en ordre d'apparition."""
     mapping: dict = {}
     result = []
     for seg in raw_segments:
@@ -134,13 +140,19 @@ class Transcriber:
             progress_callback("no_audio_found", 1.0)
             return
 
+        # diarize est impossible sans whisperx
+        diarize = diarize and WHISPERX_AVAILABLE
+
         if diarize:
             import model_setup
             model_setup.ensure_model(progress_callback)
             if self._cancelled:
                 return
 
-        self._load_whisperx_model(model_name, progress_callback)
+        if WHISPERX_AVAILABLE:
+            self._load_whisperx_model(model_name, progress_callback)
+        else:
+            self._load_openai_whisper_model(model_name, progress_callback)
 
         for i, file_path in enumerate(files):
             if self._cancelled:
@@ -165,9 +177,13 @@ class Transcriber:
                         formats, base_progress, file_progress,
                         progress_callback,
                     )
-                else:
+                elif WHISPERX_AVAILABLE:
                     segments = self._run_simple_transcription(
                         audio_path, file_path, language, formats, progress_callback,
+                    )
+                else:
+                    segments = self._run_openai_whisper_transcription(
+                        audio_path, file_path, language, formats,
                     )
             finally:
                 if tmp_audio and os.path.exists(tmp_audio):
@@ -193,6 +209,14 @@ class Transcriber:
             self._model_name = model_name
         self._device = device
 
+    def _load_openai_whisper_model(self, model_name: str, cb: Callable) -> None:
+        import whisper
+
+        if self._model_name != model_name or self._model is None:
+            cb(f"loading_model:{model_name}", 0.0)
+            self._model = whisper.load_model(model_name)
+            self._model_name = model_name
+
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str,
         formats: list[str], cb: Callable,
@@ -204,6 +228,26 @@ class Transcriber:
         if language:
             kwargs["language"] = language
         result = self._model.transcribe(audio, **kwargs)
+        segments = result["segments"]
+
+        stem = os.path.splitext(file_path)[0]
+        suffix = f"_{self._model_name}"
+        if "txt" in formats:
+            _write_txt_simple(segments, f"{stem}{suffix}.txt")
+        if "srt" in formats:
+            _write_srt(segments, f"{stem}{suffix}.srt", with_speakers=False)
+        if "json" in formats:
+            _write_json(result, f"{stem}{suffix}.json")
+        return segments
+
+    def _run_openai_whisper_transcription(
+        self, audio_path: str, file_path: str, language: str,
+        formats: list[str],
+    ) -> list:
+        kwargs = {}
+        if language:
+            kwargs["language"] = language
+        result = self._model.transcribe(audio_path, **kwargs)
         segments = result["segments"]
 
         stem = os.path.splitext(file_path)[0]

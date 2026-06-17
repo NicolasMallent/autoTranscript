@@ -48,6 +48,7 @@
 
   "diarization_label": "Identify speakers",
   "diarization_hint": "Downloads a model (~400 MB) on first use",
+  "diarization_unavailable": "Unavailable (requires Python 3.10–3.13)",
   "speakers_label": "Number of speakers (if known):",
   "speakers_min": "min",
   "speakers_max": "max",
