@@ -94,10 +94,8 @@ jobs:
 
       - name: Verifier l installation du paquet
         run: |
-          # dpkg --unpack installe les fichiers sans executer le postinst (evite 3 Go de telechargement)
+          sudo apt-get install -y ffmpeg python3-tk python3-venv --quiet
           sudo dpkg --unpack ./dist/*.deb
-          # Installe les dependances minimales pour le smoke test (postinst skippe)
-          sudo apt-get install -y python3-tk --quiet
           pip install customtkinter --quiet
           python3 /opt/autotranscript/app/main.py --check
 
