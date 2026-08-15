@@ -6,6 +6,8 @@ $ErrorActionPreference = "Stop"
 $AppDir = Split-Path -Parent $PSScriptRoot
 $VenvDir = Join-Path $AppDir ".venv"
 
+try {
+
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host "  AutoTranscript - Installation" -ForegroundColor Cyan
@@ -83,4 +85,16 @@ Write-Host "  - Le raccourci sur le bureau" -ForegroundColor Cyan
 Write-Host "  - Ou double-clic sur lancer.bat" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
-Read-Host "Appuyez sur Entree pour fermer"
+
+} catch {
+    Write-Host ""
+    Write-Host "======================================" -ForegroundColor Red
+    Write-Host "  ERREUR D'INSTALLATION" -ForegroundColor Red
+    Write-Host "======================================" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Details :" -ForegroundColor Yellow
+    Write-Host $_.InvocationInfo.PositionMessage -ForegroundColor Yellow
+} finally {
+    Read-Host "Appuyez sur Entree pour fermer"
+}
