@@ -24,8 +24,8 @@ _CONTRIBUTOR = "Nicolas Mallent (Ingénieur R&D Robotique)"
 _VERSION = "2.0.0"
 
 WHISPER_LANGUAGES = {
-    "whisper_lang_french": "French",
-    "whisper_lang_english": "English",
+    "whisper_lang_french": "fr",
+    "whisper_lang_english": "en",
     "whisper_lang_auto": "auto",
 }
 
