@@ -160,6 +160,8 @@ Tous les segments avec métadonnées (timestamps, locuteurs, langue détectée�
 
 AutoTranscript fonctionne **entièrement hors ligne** une fois les modèles téléchargés. Les fichiers audio/vidéo et les transcriptions ne quittent jamais votre ordinateur. Aucune connexion à un service tiers n'est établie pendant la transcription.
 
+Seuls des **modèles et données publics** sont téléchargés, au premier usage : modèles Whisper et d'alignement des mots, modèle de diarisation (depuis les Releases de ce dépôt) et données de découpage en phrases de NLTK (installées dans `~/.autotranscript/nltk_data`, ou à l'installation du paquet `.deb`). Si ces dernières ne peuvent pas être téléchargées, la transcription continue avec un horodatage par segment au lieu d'un horodatage par phrase.
+
 ---
 
 ## Auteurs
