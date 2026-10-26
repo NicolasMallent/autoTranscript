@@ -27,7 +27,7 @@ _AUTHORS = [
     "Pierre Andrieu (UPCité - LDAR)",
 ]
 _CONTRIBUTOR = "Nicolas Mallent (Ingénieur R&D Robotique)"
-_VERSION = "2.1.1"
+_VERSION = "2.2.0"
 
 WHISPER_LANGUAGES = {
     "whisper_lang_french": "fr",
