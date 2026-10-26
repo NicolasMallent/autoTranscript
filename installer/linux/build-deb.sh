@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Construit un paquet .deb pour AutoTranscript
-# Usage : VERSION=2.0.0 ./build-deb.sh
+# Usage : VERSION=2.1.0 ./build-deb.sh
 set -e
 
-VERSION="${VERSION:-2.0.0}"
+VERSION="${VERSION:-2.1.0}"
 PACKAGE="autotranscript"
 ARCH="all"
 APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
