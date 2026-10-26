@@ -34,6 +34,9 @@ if not WHISPERX_AVAILABLE:
 
 
 def _find_ffmpeg() -> str:
+    """
+    Renvoie l'exécutable ffmpeg embarqué (ffmpeg/<système>/) s'il existe, sinon ``ffmpeg`` du PATH.
+    """
     system = platform.system().lower()
     binary = "ffmpeg.exe" if system == "windows" else "ffmpeg"
     bundled = os.path.join(BASE_DIR, "ffmpeg", system, binary)
@@ -63,16 +66,19 @@ def _split_hms(seconds: float) -> tuple[int, int, int, int]:
 
 
 def _float_to_time(seconds: float) -> str:
+    """Formate une durée en ``HH:MM:SS.mmm`` (fichier .txt horodaté)."""
     h, m, s, ms = _split_hms(seconds)
     return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 
 def _srt_timestamp(seconds: float) -> str:
+    """Formate une durée en ``HH:MM:SS,mmm`` (séparateur décimal imposé par le format SRT)."""
     h, m, s, ms = _split_hms(seconds)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _format_hms(seconds: float) -> str:
+    """Formate une durée en ``HH:MM:SS`` (fichier .txt avec locuteurs)."""
     h, m, s, _ = _split_hms(seconds)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
@@ -114,6 +120,16 @@ def _extract_audio(video_path: str, ffmpeg_bin: str) -> str:
 
 
 def _write_txt_simple(segments: list, output_path: str) -> None:
+    """
+    Écrit le .txt horodaté : une ligne ``[début --> fin] texte`` par segment.
+
+    Après l'alignement des mots, un segment est une phrase ; sans alignement (langue sans
+    modèle, openai-whisper), c'est un bloc de parole Whisper, donc une ligne plus longue.
+
+    Args:
+        segments: Segments whisper (clés ``start``, ``end``, ``text``).
+        output_path: Fichier à écrire (écrasé s'il existe).
+    """
     with open(output_path, "w", encoding="utf-8") as f:
         for seg in segments:
             start = _float_to_time(seg["start"])
@@ -122,6 +138,13 @@ def _write_txt_simple(segments: list, output_path: str) -> None:
 
 
 def _write_txt_speakers(segments: list, output_path: str) -> None:
+    """
+    Écrit le .txt avec locuteurs : ``Locuteur 1 [début - fin] : texte``, un segment par paragraphe.
+
+    Args:
+        segments: Segments avec la clé ``speaker`` (voir ``_rename_speakers``).
+        output_path: Fichier à écrire (écrasé s'il existe).
+    """
     with open(output_path, "w", encoding="utf-8") as f:
         for seg in segments:
             start = _format_hms(seg["start"])
@@ -130,6 +153,14 @@ def _write_txt_speakers(segments: list, output_path: str) -> None:
 
 
 def _write_srt(segments: list, output_path: str, with_speakers: bool) -> None:
+    """
+    Écrit un fichier de sous-titres SRT.
+
+    Args:
+        segments: Segments whisper (clés ``start``, ``end``, ``text``, et ``speaker`` si présent).
+        output_path: Fichier à écrire (écrasé s'il existe).
+        with_speakers: Préfixe chaque sous-titre par le locuteur quand le segment en a un.
+    """
     with open(output_path, "w", encoding="utf-8") as f:
         for i, seg in enumerate(segments, 1):
             text = seg["text"].strip()
@@ -139,6 +170,7 @@ def _write_srt(segments: list, output_path: str, with_speakers: bool) -> None:
 
 
 def _write_json(data: dict | list, output_path: str) -> None:
+    """Écrit ``data`` en JSON indenté (UTF-8, sans échappement des accents)."""
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -198,6 +230,14 @@ def _rename_speakers(raw_segments: list) -> list:
 
 
 class Transcriber:
+    """
+    Transcrit des fichiers audio/vidéo avec Whisper, avec identification des locuteurs en option.
+
+    Une instance garde le modèle Whisper chargé entre deux appels à ``transcribe`` tant que
+    le modèle demandé ne change pas. Les modèles d'alignement et de diarisation, plus lourds,
+    ne sont gardés que le temps d'un lot de fichiers. ``transcribe`` est bloquant : l'interface
+    l'appelle depuis un thread et reçoit la progression par callback.
+    """
     def __init__(self):
         self._model = None
         self._model_name: str = ""
@@ -211,6 +251,11 @@ class Transcriber:
         self._diarizer = None
 
     def cancel(self) -> None:
+        """
+        Demande l'arrêt de la transcription en cours.
+
+        L'arrêt n'est pris en compte qu'entre deux fichiers : le fichier en cours va jusqu'au bout.
+        """
         self._cancelled = True
 
     def transcribe(
@@ -224,6 +269,29 @@ class Transcriber:
         max_speakers: Optional[int],
         progress_callback: Callable[[str, float], None],
     ) -> None:
+        """
+        Transcrit un fichier audio/vidéo, ou tous ceux d'un dossier (non récursif, ordre alphabétique).
+
+        Les sorties sont écrites à côté de chaque fichier source. Un fichier en échec est signalé
+        par le callback puis ignoré : il n'interrompt pas le reste du lot.
+
+        Args:
+            path: Fichier ou dossier à traiter.
+            model_name: Identifiant du modèle Whisper (cf. models.json).
+            language: Code langue (« fr », « en ») ou chaîne vide pour la détection automatique.
+            formats: Sous-ensemble de {"txt", "srt", "json"}.
+            diarize: Active l'identification des locuteurs (ignoré sans whisperx). Télécharge le
+                modèle pyannote au premier usage.
+            min_speakers: Nombre minimal de locuteurs, ou None.
+            max_speakers: Nombre maximal de locuteurs, ou None.
+            progress_callback: Appelé avec (code_message, progression entre 0 et 1). Codes émis :
+                loading_model, processing_file, extracting_audio, aligning, diarizing, done_file,
+                error, done_with_errors, all_done, no_audio_found et diarization_model_*.
+
+        Raises:
+            RuntimeError: Si le modèle de diarisation ne peut pas être téléchargé ou chargé.
+            Exception: Toute erreur de chargement du modèle Whisper (l'appelant doit la gérer).
+        """
         self._cancelled = False
         ffmpeg_bin = _find_ffmpeg()
         _logger.info("ffmpeg : %s", ffmpeg_bin)
@@ -291,6 +359,7 @@ class Transcriber:
                     else:
                         segments = self._run_simple_transcription(
                             audio_path, file_path, language, formats,
+                            base_progress, file_progress, progress_callback,
                         )
                 except Exception as exc:
                     # Un fichier en échec ne doit pas interrompre le reste du lot
@@ -486,7 +555,27 @@ class Transcriber:
 
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str, formats: list[str],
+        base_progress: float, file_progress: float, cb: Callable,
     ) -> list:
+        """
+        Transcrit un fichier sans identification des locuteurs et écrit les sorties demandées.
+
+        Avec whisperx, les mots sont alignés pour obtenir un horodatage par phrase. Si
+        l'alignement est impossible (langue sans modèle, téléchargement refusé), on garde les
+        segments Whisper, plus longs, et l'interface en est informée.
+
+        Args:
+            audio_path: Fichier audio à lire (déjà extrait si la source est une vidéo).
+            file_path: Fichier source, qui donne son nom aux sorties.
+            language: Code langue, ou chaîne vide pour la détection automatique.
+            formats: Sous-ensemble de {"txt", "srt", "json"}.
+            base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
+            file_progress: Part de la progression totale que représente ce fichier.
+            cb: Callback de progression.
+
+        Returns:
+            Les segments (une entrée par phrase si l'alignement a eu lieu).
+        """
         if WHISPERX_AVAILABLE:
             import whisperx
             audio = whisperx.load_audio(audio_path)
@@ -515,6 +604,26 @@ class Transcriber:
         formats: list[str], base_progress: float, file_progress: float,
         cb: Callable,
     ) -> list:
+        """
+        Transcrit, aligne les mots, identifie les locuteurs et écrit les sorties demandées.
+
+        Args:
+            audio_path: Fichier audio à lire (déjà extrait si la source est une vidéo).
+            file_path: Fichier source, qui donne son nom aux sorties (suffixe ``_diarized``).
+            language: Code langue, ou chaîne vide pour la détection automatique.
+            min_speakers: Nombre minimal de locuteurs, ou None.
+            max_speakers: Nombre maximal de locuteurs, ou None.
+            formats: Sous-ensemble de {"txt", "srt", "json"}.
+            base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
+            file_progress: Part de la progression totale que représente ce fichier.
+            cb: Callback de progression.
+
+        Returns:
+            Les segments, avec la clé ``speaker`` renommée (voir ``_rename_speakers``).
+
+        Raises:
+            RuntimeError: Si le modèle de diarisation est absent ou illisible.
+        """
         import whisperx
         from whisperx.diarize import assign_word_speakers
 
