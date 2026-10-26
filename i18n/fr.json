@@ -30,6 +30,8 @@
   "log_all_done": "Toutes les transcriptions sont terminées.",
   "log_error": "Erreur : {error}",
   "log_done_with_errors": "Terminé avec {failed} erreur(s) sur {total} fichier(s). Consultez le journal pour le détail.",
+  "log_cancel_requested": "Annulation demandée : le fichier en cours va se terminer avant l'arrêt.",
+  "log_cancelled": "Transcription annulée.",
   "speaker_label": "Locuteur",
   "speaker_unknown": "Locuteur ?",
   "log_no_audio_found": "Aucun fichier audio ou vidéo trouvé dans le dossier.",
@@ -73,5 +75,6 @@
 
   "error_no_input": "Veuillez sélectionner un fichier ou un dossier.",
   "error_no_format": "Veuillez sélectionner au moins un format de sortie.",
+  "error_speakers_range": "Le nombre minimal de locuteurs ne peut pas dépasser le nombre maximal.",
   "error_ffmpeg": "ffmpeg est introuvable. Veuillez relancer l'installateur."
 }

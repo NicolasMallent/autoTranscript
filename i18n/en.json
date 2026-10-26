@@ -30,6 +30,8 @@
   "log_all_done": "All transcriptions complete.",
   "log_error": "Error: {error}",
   "log_done_with_errors": "Finished with {failed} error(s) out of {total} file(s). See the log for details.",
+  "log_cancel_requested": "Cancellation requested: the current file will finish before stopping.",
+  "log_cancelled": "Transcription cancelled.",
   "speaker_label": "Speaker",
   "speaker_unknown": "Speaker ?",
   "log_no_audio_found": "No audio or video files found in folder.",
@@ -73,5 +75,6 @@
 
   "error_no_input": "Please select a file or folder.",
   "error_no_format": "Please select at least one output format.",
+  "error_speakers_range": "The minimum number of speakers cannot exceed the maximum.",
   "error_ffmpeg": "ffmpeg not found. Please run the installer again."
 }

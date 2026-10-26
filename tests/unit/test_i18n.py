@@ -1,6 +1,7 @@
 """Tests unitaires de app/i18n.py et cohérence des fichiers de langue."""
 import ast
 import json
+import logging
 import re
 
 import pytest
@@ -75,10 +76,25 @@ class TestLoadAndTranslate:
         i18n.load("fr")
         assert i18n.t("log_done_file") == "Terminé : {file}"
 
-    @pytest.mark.xfail(strict=True, reason="D14 : un placeholder manquant lève encore KeyError")
     def test_missing_placeholder_does_not_crash(self):
         i18n.load("fr")
-        assert isinstance(i18n.t("log_done_file", autre=1), str)
+        assert i18n.t("log_done_file", autre=1) == "Terminé : {file}"
+
+    def test_missing_placeholder_is_logged(self, caplog):
+        i18n.load("fr")
+        with caplog.at_level(logging.WARNING, logger="autotranscript.i18n"):
+            i18n.t("log_done_file", autre=1)
+        assert "log_done_file" in caplog.text
+
+    @pytest.mark.parametrize("text", ["{", "positionnel {} vide", "{0} indexé", "accolade } seule {x"])
+    def test_malformed_text_does_not_crash(self, monkeypatch, text):
+        monkeypatch.setattr(i18n, "_strings", {"cle": text})
+        assert i18n.t("cle", valeur=1) == text
+
+    def test_correct_placeholders_still_work_after_a_failure(self):
+        i18n.load("fr")
+        i18n.t("log_done_file", autre=1)
+        assert i18n.t("log_done_file", file="b.wav") == "Terminé : b.wav"
 
 
 class TestLanguageFiles:

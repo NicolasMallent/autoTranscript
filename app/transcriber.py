@@ -320,15 +320,20 @@ class Transcriber:
             model_setup.ensure_model(progress_callback)
             if self._cancelled:
                 _logger.info("Annulé pendant la préparation du modèle de diarisation")
+                progress_callback("cancelled", 0.0)
                 return
 
         self._load_model(model_name, progress_callback)
 
         failed = 0
+        skipped = False
+        reached = 0.0
         try:
             for i, file_path in enumerate(files):
                 if self._cancelled:
                     _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
+                    skipped = True
+                    reached = i / len(files)
                     break
 
                 base_progress = i / len(files)
@@ -381,7 +386,11 @@ class Transcriber:
         finally:
             self._release_diarization_models()
 
-        if self._cancelled:
+        # Annulé = au moins un fichier n'a pas été traité ; une annulation demandée pendant le
+        # dernier fichier ne change rien : le lot est complet
+        if skipped:
+            _logger.info("Transcription annulée")
+            progress_callback("cancelled", reached)
             return
         if failed:
             _logger.warning("%d fichier(s) en échec sur %d", failed, len(files))

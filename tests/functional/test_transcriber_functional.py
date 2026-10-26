@@ -253,7 +253,7 @@ class TestDiarization:
         t = T.Transcriber()
         monkeypatch.setattr(model_setup, "ensure_model", lambda callback=None: t.cancel())
         (source,) = write_media(tmp_path, "a_fr.wav")
-        assert run(t, source, diarize=True) == []
+        assert run(t, source, diarize=True) == [("cancelled", 0.0)]
         assert engine.model_loads == []
 
 
@@ -341,19 +341,51 @@ class TestBatchRobustness:
 
 
 class TestCancellation:
+    def _run_cancelling_on(self, t, path, trigger, **options):
+        """Lance ``transcribe`` et annule dès qu'un message commençant par ``trigger`` arrive."""
+        received = []
+
+        def callback(code, pct):
+            received.append((code, pct))
+            if code.startswith(trigger):
+                t.cancel()
+        t.transcribe(str(path), "base", "", options.get("formats", ["txt"]), options.get("diarize", False),
+                     None, None, callback)
+        return received
+
     def test_cancel_after_the_first_file(self, monkeypatch, tmp_path):
         FakeEngine(monkeypatch)
         write_media(tmp_path, "a_fr.wav", "b_fr.wav", "c_fr.wav")
-        t, received = T.Transcriber(), []
-
-        def callback(code, pct):
-            received.append(code)
-            if code.startswith("done_file:"):
-                t.cancel()
-        t.transcribe(str(tmp_path), "base", "", ["txt"], False, None, None, callback)
+        received = self._run_cancelling_on(T.Transcriber(), tmp_path, "done_file:")
         assert "a_fr_base.txt" in names(tmp_path)
         assert "b_fr_base.txt" not in names(tmp_path) and "c_fr_base.txt" not in names(tmp_path)
-        assert "all_done" not in received and not any(c.startswith("done_with_errors") for c in received)
+        assert codes(received)[-1] == "cancelled"
+        assert "all_done" not in codes(received) and not any(c.startswith("done_with_errors") for c in codes(received))
+
+    def test_cancelled_reports_the_progress_reached(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav", "c_fr.wav", "d_fr.wav")
+        received = self._run_cancelling_on(T.Transcriber(), tmp_path, "done_file:")
+        assert received[-1] == ("cancelled", pytest.approx(0.25))
+
+    def test_cancel_during_the_last_file_is_a_normal_completion(self, monkeypatch, tmp_path):
+        """Rien n'a été sauté : le lot est terminé, pas annulé."""
+        FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        received = self._run_cancelling_on(T.Transcriber(), tmp_path, "processing_file:b_fr")
+        assert {"a_fr_base.txt", "b_fr_base.txt"} <= set(names(tmp_path))
+        assert codes(received)[-1] == "all_done" and "cancelled" not in codes(received)
+
+    def test_cancel_with_a_failing_file_still_reports_the_cancellation(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        t = T.Transcriber()
+
+        def explode(audio, language):
+            raise RuntimeError("panne")
+        monkeypatch.setattr(t, "_transcribe", explode)
+        received = self._run_cancelling_on(t, tmp_path, "error:")
+        assert codes(received)[-1] == "cancelled"
 
     def test_models_are_released_after_a_cancellation(self, monkeypatch, tmp_path, model_setup_dirs, ui_lang):
         FakeEngine(monkeypatch)

@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 
 from paths import BASE_DIR
+
+_logger = logging.getLogger("autotranscript.i18n")
 
 _strings: dict = {}
 _current_lang: str = "fr"
@@ -34,10 +37,16 @@ def t(key: str, **kwargs) -> str:
 
     Returns:
         Le texte formaté, ou la clé elle-même si elle n'existe pas dans la langue chargée.
+        Si le formatage échoue (paramètre manquant, accolades invalides), le texte est renvoyé
+        tel quel et l'incident est journalisé.
     """
     text = _strings.get(key, key)
     if kwargs:
-        text = text.format(**kwargs)
+        try:
+            text = text.format(**kwargs)
+        except (KeyError, IndexError, ValueError):
+            # Un texte de traduction mal formé ne doit pas faire planter l'interface
+            _logger.warning("Texte mal formé ou paramètre manquant pour la clé %r", key, exc_info=True)
     return text
 
 
