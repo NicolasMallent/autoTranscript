@@ -16,11 +16,13 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from paths import APP_DATA_DIR
+
 ProgressCallback = Optional[Callable[[str, float], None]]
 
 _logger = logging.getLogger("autotranscript.model_setup")
 
-_MODELS_DIR = Path.home() / ".autotranscript" / "models"
+_MODELS_DIR = APP_DATA_DIR / "models"
 
 # Dossier du modèle, tel que pyannote le charge (config.yaml + sous-dossiers)
 MODEL_DIR = _MODELS_DIR / "speaker-diarization-community-1"

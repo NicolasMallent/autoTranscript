@@ -11,12 +11,12 @@ import customtkinter as ctk
 
 import i18n as i18n_mod
 import log_setup
+from paths import APP_DATA_DIR, BASE_DIR
 from transcriber import Transcriber, WHISPERX_AVAILABLE, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
 _logger = logging.getLogger("autotranscript.gui")
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".autotranscript", "config.json")
+_CONFIG_PATH = os.path.join(APP_DATA_DIR, "config.json")
 _REPO_URL = "https://github.com/NicolasMallent/autoTranscript"
 
 _AUTHORS = [
@@ -35,7 +35,7 @@ WHISPER_LANGUAGES = {
 
 
 def _load_models() -> list[dict]:
-    path = os.path.join(_BASE_DIR, "models.json")
+    path = os.path.join(BASE_DIR, "models.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 

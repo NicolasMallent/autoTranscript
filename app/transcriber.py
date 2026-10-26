@@ -1,15 +1,18 @@
-import datetime
+import gc
+import importlib.util
 import json
 import logging
 import os
 import platform
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Callable, Optional
 
 import i18n
 import model_setup
+from paths import BASE_DIR
 
 _logger = logging.getLogger("autotranscript.transcriber")
 
@@ -17,39 +20,61 @@ AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"}
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".flv"}
 ALL_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Taille de lot de la transcription whisperx
+_BATCH_SIZE = 8
 
+# find_spec évite d'importer whisperx (et torch, lent) au démarrage de l'interface.
+# Une installation cassée n'est donc détectée qu'au premier import réel.
 try:
-    import whisperx as _wx_probe
-    del _wx_probe
-    WHISPERX_AVAILABLE = True
-except Exception:
+    WHISPERX_AVAILABLE = importlib.util.find_spec("whisperx") is not None
+except (ImportError, ValueError):
     WHISPERX_AVAILABLE = False
-    _logger.warning("whisperx indisponible, repli sur openai-whisper sans diarisation", exc_info=True)
+if not WHISPERX_AVAILABLE:
+    _logger.warning("whisperx non installé : repli sur openai-whisper, sans diarisation")
 
 
 def _find_ffmpeg() -> str:
     system = platform.system().lower()
     binary = "ffmpeg.exe" if system == "windows" else "ffmpeg"
-    bundled = os.path.join(_BASE_DIR, "ffmpeg", system, binary)
+    bundled = os.path.join(BASE_DIR, "ffmpeg", system, binary)
     if os.path.isfile(bundled):
         return bundled
     return "ffmpeg"
 
 
+def _split_hms(seconds: float) -> tuple[int, int, int, int]:
+    """
+    Découpe une durée en (heures, minutes, secondes, millisecondes).
+
+    La durée est d'abord arrondie à la milliseconde : aucun champ ne peut donc afficher
+    60 (ex. 59,9996 s donne 00:01:00,000 et non 00:00:60,000).
+
+    Args:
+        seconds: Durée en secondes.
+
+    Returns:
+        Le tuple (h, m, s, ms).
+    """
+    total_ms = int(round(seconds * 1000))
+    h, rem = divmod(total_ms, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    return h, m, s, ms
+
+
 def _float_to_time(seconds: float) -> str:
-    delta = datetime.timedelta(seconds=seconds)
-    h, rem = divmod(delta.total_seconds(), 3600)
-    m, s = divmod(rem, 60)
-    return f"{int(h):02}:{int(m):02}:{s:06.3f}"
+    h, m, s, ms = _split_hms(seconds)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 
 def _srt_timestamp(seconds: float) -> str:
-    ms = int(round(seconds * 1000))
-    h, rem = divmod(ms, 3600000)
-    m, rem = divmod(rem, 60000)
-    s, ms = divmod(rem, 1000)
+    h, m, s, ms = _split_hms(seconds)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _format_hms(seconds: float) -> str:
+    h, m, s, _ = _split_hms(seconds)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def _extract_audio(video_path: str, ffmpeg_bin: str) -> str:
@@ -104,12 +129,8 @@ def _write_txt_simple(segments: list, output_path: str) -> None:
 def _write_txt_speakers(segments: list, output_path: str) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         for seg in segments:
-            h_s, rem = divmod(int(seg["start"]), 3600)
-            m_s, s_s = divmod(rem, 60)
-            h_e, rem = divmod(int(seg["end"]), 3600)
-            m_e, s_e = divmod(rem, 60)
-            start = f"{h_s:02d}:{m_s:02d}:{s_s:02d}"
-            end = f"{h_e:02d}:{m_e:02d}:{s_e:02d}"
+            start = _format_hms(seg["start"])
+            end = _format_hms(seg["end"])
             f.write(f"{seg['speaker']} [{start} - {end}] : {seg['text']}\n\n")
 
 
@@ -125,6 +146,32 @@ def _write_srt(segments: list, output_path: str, with_speakers: bool) -> None:
 def _write_json(data: dict | list, output_path: str) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _write_outputs(
+    segments: list, raw: dict | list, file_path: str, suffix: str,
+    formats: list[str], with_speakers: bool,
+) -> None:
+    """
+    Écrit les fichiers de sortie demandés à côté du fichier source.
+
+    Args:
+        segments: Segments à écrire dans les formats texte et sous-titres.
+        raw: Données écrites telles quelles dans le fichier JSON.
+        file_path: Fichier source ; les sorties portent son nom sans extension.
+        suffix: Suffixe ajouté au nom (ex. ``_base`` ou ``_base_diarized``).
+        formats: Sous-ensemble de {"txt", "srt", "json"}.
+        with_speakers: True si les segments portent une clé ``speaker``.
+    """
+    stem = os.path.splitext(file_path)[0]
+    writers = {
+        "txt": lambda path: (_write_txt_speakers if with_speakers else _write_txt_simple)(segments, path),
+        "srt": lambda path: _write_srt(segments, path, with_speakers),
+        "json": lambda path: _write_json(raw, path),
+    }
+    for fmt in formats:
+        writers[fmt](f"{stem}{suffix}.{fmt}")
+        _logger.debug("Sortie écrite : .%s", fmt)
 
 
 def _rename_speakers(raw_segments: list) -> list:
@@ -159,7 +206,14 @@ class Transcriber:
     def __init__(self):
         self._model = None
         self._model_name: str = ""
+        self._device: str = "cpu"
         self._cancelled: bool = False
+        # Modèles d'alignement et de diarisation : gardés le temps d'un lot de fichiers
+        # pour ne pas les recharger à chaque fichier, libérés à la fin du lot
+        self._align_model = None
+        self._align_metadata = None
+        self._align_lang: Optional[str] = None
+        self._diarizer = None
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -180,11 +234,11 @@ class Transcriber:
         _logger.info("ffmpeg : %s", ffmpeg_bin)
 
         if os.path.isdir(path):
-            files = [
+            files = sorted(
                 os.path.join(path, f)
                 for f in os.listdir(path)
                 if os.path.splitext(f)[1].lower() in ALL_EXTENSIONS
-            ]
+            )
         else:
             files = [path]
 
@@ -205,67 +259,63 @@ class Transcriber:
                 _logger.info("Annulé pendant la préparation du modèle de diarisation")
                 return
 
-        if WHISPERX_AVAILABLE:
-            self._load_whisperx_model(model_name, progress_callback)
-        else:
-            self._load_openai_whisper_model(model_name, progress_callback)
+        self._load_model(model_name, progress_callback)
 
         failed = 0
-        for i, file_path in enumerate(files):
-            if self._cancelled:
-                _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
-                break
+        try:
+            for i, file_path in enumerate(files):
+                if self._cancelled:
+                    _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
+                    break
 
-            base_progress = i / len(files)
-            file_progress = 1.0 / len(files)
-            started = time.monotonic()
-            # Pas de nom de fichier dans le log (il peut être partagé) : index et extension seulement
-            _logger.info(
-                "Fichier %d/%d (%s) : début", i + 1, len(files),
-                os.path.splitext(file_path)[1].lower(),
-            )
-            progress_callback(f"processing_file:{os.path.basename(file_path)}", base_progress)
-
-            tmp_audio = None
-            try:
-                audio_path = file_path
-                if os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS:
-                    progress_callback(f"extracting_audio:{os.path.basename(file_path)}", base_progress)
-                    tmp_audio = _extract_audio(file_path, ffmpeg_bin)
-                    audio_path = tmp_audio
-
-                if diarize:
-                    segments = self._run_diarization_pipeline(
-                        audio_path, file_path, language,
-                        min_speakers, max_speakers,
-                        formats, base_progress, file_progress,
-                        progress_callback,
-                    )
-                elif WHISPERX_AVAILABLE:
-                    segments = self._run_simple_transcription(
-                        audio_path, file_path, language, formats, progress_callback,
-                    )
-                else:
-                    segments = self._run_openai_whisper_transcription(
-                        audio_path, file_path, language, formats,
-                    )
-            except Exception as exc:
-                # Un fichier en échec ne doit pas interrompre le reste du lot
-                failed += 1
-                _logger.exception("Fichier %d/%d : échec", i + 1, len(files))
-                progress_callback(
-                    f"error:{os.path.basename(file_path)} — {exc}", base_progress + file_progress,
+                base_progress = i / len(files)
+                file_progress = 1.0 / len(files)
+                started = time.monotonic()
+                # Pas de nom de fichier dans le log (il peut être partagé) : index et extension seulement
+                _logger.info(
+                    "Fichier %d/%d (%s) : début", i + 1, len(files),
+                    os.path.splitext(file_path)[1].lower(),
                 )
-                continue
-            finally:
-                if tmp_audio and os.path.exists(tmp_audio):
-                    os.unlink(tmp_audio)
+                progress_callback(f"processing_file:{os.path.basename(file_path)}", base_progress)
 
-            _logger.info(
-                "Fichier %d/%d : terminé en %.1f s (%d segments)",
-                i + 1, len(files), time.monotonic() - started, len(segments),
-            )
-            progress_callback(f"done_file:{os.path.basename(file_path)}", base_progress + file_progress)
+                tmp_audio = None
+                try:
+                    audio_path = file_path
+                    if os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS:
+                        progress_callback(f"extracting_audio:{os.path.basename(file_path)}", base_progress)
+                        tmp_audio = _extract_audio(file_path, ffmpeg_bin)
+                        audio_path = tmp_audio
+
+                    if diarize:
+                        segments = self._run_diarization_pipeline(
+                            audio_path, file_path, language,
+                            min_speakers, max_speakers,
+                            formats, base_progress, file_progress,
+                            progress_callback,
+                        )
+                    else:
+                        segments = self._run_simple_transcription(
+                            audio_path, file_path, language, formats,
+                        )
+                except Exception as exc:
+                    # Un fichier en échec ne doit pas interrompre le reste du lot
+                    failed += 1
+                    _logger.exception("Fichier %d/%d : échec", i + 1, len(files))
+                    progress_callback(
+                        f"error:{os.path.basename(file_path)} — {exc}", base_progress + file_progress,
+                    )
+                    continue
+                finally:
+                    if tmp_audio and os.path.exists(tmp_audio):
+                        os.unlink(tmp_audio)
+
+                _logger.info(
+                    "Fichier %d/%d : terminé en %.1f s (%d segments)",
+                    i + 1, len(files), time.monotonic() - started, len(segments),
+                )
+                progress_callback(f"done_file:{os.path.basename(file_path)}", base_progress + file_progress)
+        finally:
+            self._release_diarization_models()
 
         if self._cancelled:
             return
@@ -278,33 +328,49 @@ class Transcriber:
 
     # ── private ──────────────────────────────────────────────────────────────
 
-    def _load_whisperx_model(self, model_name: str, cb: Callable) -> None:
-        import torch
-        import whisperx
+    @staticmethod
+    def _free_memory() -> None:
+        """Ramasse les objets libérés et vide le cache GPU (sans importer torch s'il est absent)."""
+        gc.collect()
+        torch = sys.modules.get("torch")
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
+    def _load_model(self, model_name: str, cb: Callable) -> None:
+        """
+        Charge le modèle Whisper (whisperx si disponible, sinon openai-whisper).
 
-        if self._model_name != model_name or self._model is None:
-            cb(f"loading_model:{model_name}", 0.0)
+        Le modèle déjà chargé est réutilisé s'il porte le même nom ; sinon il est libéré
+        avant de charger le suivant.
+
+        Args:
+            model_name: Identifiant du modèle (cf. models.json).
+            cb: Callback de progression.
+        """
+        if WHISPERX_AVAILABLE:
+            import torch
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if self._model is not None and self._model_name == model_name:
+            return
+        if self._model is not None:
+            self._model = None
+            self._free_memory()
+
+        cb(f"loading_model:{model_name}", 0.0)
+        started = time.monotonic()
+        if WHISPERX_AVAILABLE:
+            import whisperx
+            compute_type = "float16" if self._device == "cuda" else "int8"
             _logger.info("Chargement du modèle whisperx %s (device=%s, compute_type=%s)",
-                         model_name, device, compute_type)
-            started = time.monotonic()
-            self._model = whisperx.load_model(model_name, device, compute_type=compute_type)
-            self._model_name = model_name
-            _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
-        self._device = device
-
-    def _load_openai_whisper_model(self, model_name: str, cb: Callable) -> None:
-        import whisper
-
-        if self._model_name != model_name or self._model is None:
-            cb(f"loading_model:{model_name}", 0.0)
+                         model_name, self._device, compute_type)
+            self._model = whisperx.load_model(model_name, self._device, compute_type=compute_type)
+        else:
+            import whisper
             _logger.info("Chargement du modèle openai-whisper %s", model_name)
-            started = time.monotonic()
             self._model = whisper.load_model(model_name)
-            self._model_name = model_name
-            _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
+        self._model_name = model_name
+        _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
 
     def _load_diarization_pipeline(self, pipeline_class):
         """
@@ -332,47 +398,77 @@ class Transcriber:
             _logger.exception("Echec du chargement de la pipeline de diarisation")
             raise RuntimeError(f"Cannot load the diarization model from {model_dir}: {exc}") from exc
 
-    def _run_simple_transcription(
-        self, audio_path: str, file_path: str, language: str,
-        formats: list[str], cb: Callable,
-    ) -> list:
+    def _get_align_model(self, lang: str):
+        """
+        Renvoie le modèle d'alignement pour la langue donnée, en le chargeant si besoin.
+
+        Un seul modèle est gardé : il est remplacé quand la langue change d'un fichier
+        à l'autre (détection automatique).
+
+        Args:
+            lang: Code langue (ex. "fr").
+
+        Returns:
+            Le tuple (modèle, métadonnées) attendu par ``whisperx.align``.
+        """
         import whisperx
 
-        audio = whisperx.load_audio(audio_path)
-        kwargs = {"batch_size": 8}
-        if language:
-            kwargs["language"] = language
-        result = self._model.transcribe(audio, **kwargs)
-        segments = result["segments"]
+        if self._align_lang != lang:
+            if self._align_model is not None:
+                self._align_model = self._align_metadata = None
+                self._free_memory()
+            _logger.info("Chargement du modèle d'alignement (%s)", lang)
+            self._align_model, self._align_metadata = whisperx.load_align_model(
+                language_code=lang, device=self._device,
+            )
+            self._align_lang = lang
+        return self._align_model, self._align_metadata
 
-        stem = os.path.splitext(file_path)[0]
-        suffix = f"_{self._model_name}"
-        if "txt" in formats:
-            _write_txt_simple(segments, f"{stem}{suffix}.txt")
-        if "srt" in formats:
-            _write_srt(segments, f"{stem}{suffix}.srt", with_speakers=False)
-        if "json" in formats:
-            _write_json(result, f"{stem}{suffix}.json")
-        return segments
+    def _get_diarizer(self):
+        """Renvoie la pipeline de diarisation, chargée une seule fois par lot."""
+        if self._diarizer is None:
+            from whisperx.diarize import DiarizationPipeline
+            self._diarizer = self._load_diarization_pipeline(DiarizationPipeline)
+        return self._diarizer
 
-    def _run_openai_whisper_transcription(
-        self, audio_path: str, file_path: str, language: str,
-        formats: list[str],
-    ) -> list:
+    def _release_diarization_models(self) -> None:
+        """Libère les modèles d'alignement et de diarisation (et la mémoire GPU associée)."""
+        if self._align_model is None and self._diarizer is None:
+            return
+        self._align_model = self._align_metadata = self._align_lang = None
+        self._diarizer = None
+        self._free_memory()
+
+    def _transcribe(self, audio, language: str) -> dict:
+        """
+        Lance la transcription Whisper avec le moteur chargé.
+
+        Args:
+            audio: Tableau audio (whisperx) ou chemin du fichier (openai-whisper).
+            language: Code langue, ou chaîne vide pour la détection automatique.
+
+        Returns:
+            Le résultat du moteur (clés ``segments`` et ``language``).
+        """
         kwargs = {}
         if language:
             kwargs["language"] = language
-        result = self._model.transcribe(audio_path, **kwargs)
+        if WHISPERX_AVAILABLE:
+            kwargs["batch_size"] = _BATCH_SIZE
+        return self._model.transcribe(audio, **kwargs)
+
+    def _run_simple_transcription(
+        self, audio_path: str, file_path: str, language: str, formats: list[str],
+    ) -> list:
+        if WHISPERX_AVAILABLE:
+            import whisperx
+            audio = whisperx.load_audio(audio_path)
+        else:
+            audio = audio_path
+        result = self._transcribe(audio, language)
         segments = result["segments"]
 
-        stem = os.path.splitext(file_path)[0]
-        suffix = f"_{self._model_name}"
-        if "txt" in formats:
-            _write_txt_simple(segments, f"{stem}{suffix}.txt")
-        if "srt" in formats:
-            _write_srt(segments, f"{stem}{suffix}.srt", with_speakers=False)
-        if "json" in formats:
-            _write_json(result, f"{stem}{suffix}.json")
+        _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
         return segments
 
     def _run_diarization_pipeline(
@@ -382,20 +478,16 @@ class Transcriber:
         cb: Callable,
     ) -> list:
         import whisperx
-        from whisperx.diarize import DiarizationPipeline, assign_word_speakers
+        from whisperx.diarize import assign_word_speakers
 
         audio = whisperx.load_audio(audio_path)
-        kwargs = {"batch_size": 8}
-        if language:
-            kwargs["language"] = language
-        result = self._model.transcribe(audio, **kwargs)
+        result = self._transcribe(audio, language)
         detected_lang = result.get("language", language or "fr")
         _logger.info("Langue utilisée pour l'alignement : %s", detected_lang)
 
         cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * 0.4)
-        model_a, metadata = whisperx.load_align_model(language_code=detected_lang, device=self._device)
+        model_a, metadata = self._get_align_model(detected_lang)
         result = whisperx.align(result["segments"], model_a, metadata, audio, self._device)
-        del model_a
 
         cb(f"diarizing:{os.path.basename(file_path)}", base_progress + file_progress * 0.65)
         diarize_kwargs = {}
@@ -404,19 +496,12 @@ class Transcriber:
         if max_speakers:
             diarize_kwargs["max_speakers"] = max_speakers
         _logger.info("Diarisation (min=%s, max=%s)", min_speakers, max_speakers)
-        diarize_model = self._load_diarization_pipeline(DiarizationPipeline)
-        diarize_segments = diarize_model(audio, **diarize_kwargs)
-        del diarize_model
+        diarize_segments = self._get_diarizer()(audio, **diarize_kwargs)
 
         result = assign_word_speakers(diarize_segments, result)
         segments = _rename_speakers(result["segments"])
 
-        stem = os.path.splitext(file_path)[0]
-        suffix = f"_{self._model_name}_diarized"
-        if "txt" in formats:
-            _write_txt_speakers(segments, f"{stem}{suffix}.txt")
-        if "srt" in formats:
-            _write_srt(segments, f"{stem}{suffix}.srt", with_speakers=True)
-        if "json" in formats:
-            _write_json(segments, f"{stem}{suffix}.json")
+        _write_outputs(
+            segments, segments, file_path, f"_{self._model_name}_diarized", formats, with_speakers=True,
+        )
         return segments
