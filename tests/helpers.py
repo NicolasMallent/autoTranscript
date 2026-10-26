@@ -219,10 +219,13 @@ class FakeEngine:
         punkt_ready: Les données NLTK (punkt_tab) sont déjà présentes.
         punkt_download_fails: Exception levée par le téléchargement des données NLTK.
         align_error: Exception levée par ``whisperx.align`` (ex. ``LookupError`` de punkt_tab).
+        diarizer_error: Exception levée au CHARGEMENT de la pipeline de diarisation.
+        diarize_error: Exception levée par la diarisation elle-même (après la transcription).
     """
 
     def __init__(self, monkeypatch, *, align_fail=(), openai=False, cuda=False,
-                 punkt_ready=True, punkt_download_fails=None, align_error=None):
+                 punkt_ready=True, punkt_download_fails=None, align_error=None,
+                 diarizer_error=None, diarize_error=None):
         import transcriber
 
         self.model_loads = []        # (nom, device, compute_type)
@@ -234,7 +237,11 @@ class FakeEngine:
         self.cuda_empty_cache_calls = 0
         self.align_fail = set(align_fail)
         self.align_error = align_error
-        self.order = []              # ("load_model", nom), ("nltk_download",) : ordre des étapes lourdes
+        self.diarizer_error = diarizer_error
+        self.diarize_error = diarize_error
+        # Ordre des étapes lourdes : ("load_model", nom), ("nltk_download",), ("diarizer_load",),
+        # ("align_load", langue), ("transcribe", audio)
+        self.order = []
         self.nltk = FakeNltk(monkeypatch, ready=punkt_ready, download_fails=punkt_download_fails,
                              order=self.order)
         engine = self
@@ -242,6 +249,7 @@ class FakeEngine:
         class Model:
             def transcribe(self, audio, **kwargs):
                 engine.transcribe_calls.append((audio, kwargs))
+                engine.order.append(("transcribe", audio))
                 return {"segments": [{"start": 18.796, "end": 43.231, "text": CHUNK_TEXT}],
                         "language": _guess_lang(audio, kwargs)}
 
@@ -253,6 +261,7 @@ class FakeEngine:
             return Model()
 
         def load_align_model(language_code, device):
+            engine.order.append(("align_load", language_code))
             if language_code in engine.align_fail:
                 raise ValueError(f"No default align-model for language: {language_code}")
             engine.align_loads.append(language_code)
@@ -272,9 +281,14 @@ class FakeEngine:
 
         class DiarizationPipeline:
             def __init__(self, model_name, device):
+                engine.order.append(("diarizer_load",))
+                if engine.diarizer_error:
+                    raise engine.diarizer_error
                 engine.diarizer_loads.append((model_name, device))
 
             def __call__(self, audio, **kwargs):
+                if engine.diarize_error:
+                    raise engine.diarize_error
                 engine.diarize_calls.append(kwargs)
                 return "diarization"
 

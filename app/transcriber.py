@@ -290,7 +290,8 @@ class Transcriber:
             progress_callback: Appelé avec (code_message, progression entre 0 et 1). Codes émis :
                 loading_model, processing_file, extracting_audio, aligning, diarizing, done_file,
                 error, done_with_errors, all_done, cancelled, no_audio_found, align_unavailable,
-                sentence_data_download, sentence_data_unavailable et diarization_model_*.
+                sentence_data_download, sentence_data_unavailable, loading_align_model,
+                diarization_failed et diarization_model_*.
 
         Raises:
             RuntimeError: Si le modèle de diarisation ne peut pas être téléchargé ou chargé.
@@ -345,6 +346,7 @@ class Transcriber:
         skipped = False
         reached = 0.0
         try:
+            diarize = self._prepare_batch(diarize, language, progress_callback)
             for i, file_path in enumerate(files):
                 if self._cancelled:
                     _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
@@ -416,6 +418,44 @@ class Transcriber:
             progress_callback("all_done", 1.0)
 
     # ── private ──────────────────────────────────────────────────────────────
+
+    def _prepare_batch(self, diarize: bool, language: str, cb: Callable) -> bool:
+        """
+        Charge avant le calcul ce dont le lot aura besoin, pour dégrader tout de suite plutôt que
+        découvrir un problème après des dizaines de minutes.
+
+        Politique : ne jamais perdre ni bloquer un travail, dégrader et le dire. Un échec de
+        chargement n'interrompt donc pas le lot : il le fait passer en mode simple (sans locuteurs)
+        ou sans alignement, avec un message unique pour tout le lot.
+
+        Args:
+            diarize: Identification des locuteurs demandée (et possible).
+            language: Langue imposée, ou chaîne vide (détection automatique : le modèle d'alignement
+                ne peut alors pas être anticipé, ``_try_align`` reste le filet par fichier).
+            cb: Callback de progression.
+
+        Returns:
+            True si la diarisation reste utilisable pour ce lot.
+        """
+        if diarize:
+            try:
+                self._get_diarizer()
+            except Exception:
+                _logger.exception("Pipeline de diarisation inutilisable : lot traité sans locuteurs")
+                cb("diarization_failed", 0.0)
+                diarize = False
+        if language and self._alignment_enabled:
+            cb(f"loading_align_model:{language}", 0.0)
+            try:
+                self._get_align_model(language)
+            except Exception:
+                _logger.warning(
+                    "Modèle d'alignement indisponible (langue %s) : horodatage par segment",
+                    language, exc_info=True,
+                )
+                cb(f"align_unavailable:{language}", 0.0)
+                self._alignment_enabled = False
+        return diarize
 
     @staticmethod
     def _free_memory() -> None:
@@ -661,7 +701,8 @@ class Transcriber:
         Transcrit, aligne les mots, identifie les locuteurs et écrit les sorties demandées.
 
         Si l'alignement est impossible, les locuteurs sont attribués aux segments Whisper (plus longs)
-        au lieu de perdre la transcription.
+        au lieu de perdre la transcription. Si l'identification des locuteurs échoue, la transcription
+        est enregistrée au format simple (sans locuteurs) et le code ``diarization_failed`` est émis.
 
         Args:
             audio_path: Fichier audio à lire (déjà extrait si la source est une vidéo).
@@ -695,10 +736,18 @@ class Transcriber:
         if max_speakers:
             diarize_kwargs["max_speakers"] = max_speakers
         _logger.info("Diarisation (min=%s, max=%s)", min_speakers, max_speakers)
-        diarize_segments = self._get_diarizer()(audio, **diarize_kwargs)
-
-        result = assign_word_speakers(diarize_segments, result)
-        segments = _rename_speakers(result["segments"])
+        try:
+            diarize_segments = self._get_diarizer()(audio, **diarize_kwargs)
+            result = assign_word_speakers(diarize_segments, result)
+            segments = _rename_speakers(result["segments"])
+        except Exception:
+            # La transcription est déjà calculée (parfois des dizaines de minutes) : on l'enregistre
+            # sans locuteurs plutôt que de la perdre
+            _logger.exception("Identification des locuteurs impossible : transcription enregistrée sans locuteurs")
+            cb("diarization_failed", base_progress + file_progress * 0.65)
+            segments = result["segments"]
+            _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
+            return segments
 
         _write_outputs(
             segments, segments, file_path, f"_{self._model_name}_diarized", formats, with_speakers=True,

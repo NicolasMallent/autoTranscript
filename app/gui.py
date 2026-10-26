@@ -61,6 +61,7 @@ _EVENTS_WITH_ARGUMENT = {            # événement: (clé i18n, nom du paramètr
     "diarizing": ("log_diarizing", "file"),
     "done_file": ("log_done_file", "file"),
     "align_unavailable": ("log_align_unavailable", "lang"),
+    "loading_align_model": ("log_loading_align_model", "lang"),
     "error": ("log_error", "error"),
 }
 _EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
@@ -73,6 +74,7 @@ _EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
     "diarization_model_cached": "log_diarization_model_ready",
     "sentence_data_download": "log_sentence_data_download",
     "sentence_data_unavailable": "log_sentence_data_unavailable",
+    "diarization_failed": "log_diarization_failed",
 }
 _EVENTS_WITH_COUNTS = {              # événement: (clé i18n, (paramètres), remplace la dernière ligne ?)
     "done_with_errors": ("log_done_with_errors", ("failed", "total"), False),

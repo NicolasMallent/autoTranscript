@@ -75,6 +75,8 @@
   "log_diarizing": "Identifying speakers: {file}",
   "log_sentence_data_download": "Downloading sentence-splitting data (one time only)...",
   "log_sentence_data_unavailable": "Sentence-splitting data unavailable (download failed): using segment timestamps. See the log for details.",
+  "log_loading_align_model": "Loading the alignment model ({lang})...",
+  "log_diarization_failed": "Speaker identification failed: transcription saved without speakers. See the log for details.",
   "log_align_unavailable": "Sentence timestamps unavailable (language \"{lang}\" or alignment model could not be downloaded): using segment timestamps. See the log for details.",
 
   "error_no_input": "Please select a file or folder.",

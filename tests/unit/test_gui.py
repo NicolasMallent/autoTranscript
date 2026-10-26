@@ -501,6 +501,7 @@ class TestTranslateMessage:
         ("done_file:a.mp3", "log_done_file", {"file": "a.mp3"}),
         ("align_unavailable:xx", "log_align_unavailable", {"lang": "xx"}),
         ("error:panne", "log_error", {"error": "panne"}),
+        ("loading_align_model:fr", "log_loading_align_model", {"lang": "fr"}),
     ])
     def test_events_with_an_argument(self, message, key, params):
         assert gui._translate_message(message) == gui._LogLine(key, params)
@@ -513,6 +514,7 @@ class TestTranslateMessage:
         ("diarization_model_extracting", "log_diarization_model_extracting"),
         ("diarization_model_ready", "log_diarization_model_ready"),
         ("diarization_model_cached", "log_diarization_model_ready"),
+        ("diarization_failed", "log_diarization_failed"),
     ])
     def test_events_without_an_argument(self, message, key):
         assert gui._translate_message(message) == gui._LogLine(key, {})

@@ -232,6 +232,162 @@ class TestAlignmentFailureFallback:
         assert received[-1] == "all_done"
 
 
+def position(order, step):
+    """Rang de la première étape de ce type dans ``engine.order`` (comparée par son nom)."""
+    return next(i for i, entry in enumerate(order) if entry[0] == step)
+
+
+class TestPreflight:
+    """Vérifications préalables : on charge avant le calcul ce dont le lot aura besoin."""
+
+    @pytest.fixture
+    def ready_model(self, model_setup_dirs):
+        populate_model_dir(model_setup_dirs)
+
+    def test_the_diarizer_is_loaded_before_the_first_transcription(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        engine = FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        run(T.Transcriber(), source, diarize=True, formats=["txt"])
+        assert position(engine.order, "diarizer_load") < position(engine.order, "transcribe")
+
+    def test_no_diarizer_is_loaded_when_speakers_are_not_requested(self, monkeypatch, tmp_path, ready_model):
+        engine = FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        run(T.Transcriber(), source, formats=["txt"])
+        assert ("diarizer_load",) not in engine.order
+
+    def test_an_unusable_diarizer_degrades_the_whole_batch_to_simple_mode(self, monkeypatch, tmp_path, ready_model,
+                                                                         ui_lang, caplog):
+        engine = FakeEngine(monkeypatch, diarizer_error=OSError("poids illisibles"))
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        with caplog.at_level(logging.ERROR, logger="autotranscript.transcriber"):
+            received = codes(run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"]))
+        assert received.count("diarization_failed") == 1       # une fois pour le lot, pas par fichier
+        assert not any(n.endswith("_diarized.txt") for n in names(tmp_path))
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == THREE_SENTENCES
+        assert (tmp_path / "b_fr_base.txt").read_text(encoding="utf-8") == THREE_SENTENCES
+        assert len(engine.transcribe_calls) == 2 and received[-1] == "all_done"
+        assert "poids illisibles" in caplog.text               # la cause est dans le log
+
+    def test_the_degradation_happens_before_any_calculation(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        engine = FakeEngine(monkeypatch, diarizer_error=OSError("poids illisibles"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, diarize=True, formats=["txt"]))
+        assert received.index("diarization_failed") < received.index("processing_file:a_fr.wav")
+        assert position(engine.order, "diarizer_load") < position(engine.order, "transcribe")
+
+    def test_a_forced_language_loads_the_alignment_model_before_the_calculation(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        received = codes(run(T.Transcriber(), tmp_path, language="fr", formats=["txt"]))
+        assert position(engine.order, "align_load") < position(engine.order, "transcribe")
+        assert received.index("loading_align_model:fr") < received.index("processing_file:a_fr.wav")
+        assert engine.align_loads == ["fr"]                    # chargé une seule fois pour le lot
+
+    def test_automatic_language_cannot_preload_the_alignment_model(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, language="", formats=["txt"]))
+        assert position(engine.order, "transcribe") < position(engine.order, "align_load")
+        assert not any(c.startswith("loading_align_model") for c in received)
+
+    def test_a_missing_alignment_model_falls_back_once_for_the_whole_batch(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, align_fail=["fr"])
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        received = codes(run(T.Transcriber(), tmp_path, language="fr", formats=["txt"]))
+        assert received.count("align_unavailable:fr") == 1
+        assert not any(c.startswith("aligning:") for c in received)
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        assert (tmp_path / "b_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        assert received[-1] == "all_done" and engine.align_loads == []
+
+    def test_no_alignment_preload_when_the_sentence_data_are_missing(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, punkt_ready=False, punkt_download_fails=OSError("coupure"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, language="fr", formats=["txt"]))
+        assert ("align_load", "fr") not in engine.order
+        assert not any(c.startswith("loading_align_model") for c in received)
+
+    def test_nothing_is_preloaded_when_there_is_no_file(self, monkeypatch, tmp_path, ready_model):
+        engine = FakeEngine(monkeypatch)
+        run(T.Transcriber(), tmp_path, language="fr", diarize=True)
+        assert engine.order == [] and engine.model_loads == []
+
+    def test_preloaded_models_are_released_after_the_batch(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        t = T.Transcriber()
+        run(t, source, language="fr", diarize=True, formats=["txt"])
+        assert t._diarizer is None and t._align_model is None
+
+
+class TestDiarizationFailureAfterTranscription:
+    """Politique : une transcription déjà calculée n'est jamais perdue."""
+
+    @pytest.fixture
+    def ready_model(self, model_setup_dirs):
+        populate_model_dir(model_setup_dirs)
+
+    def test_the_transcription_is_saved_without_speakers(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch, diarize_error=RuntimeError("mémoire insuffisante"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, diarize=True, formats=["txt", "srt", "json"]))
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == THREE_SENTENCES
+        assert {"a_fr_base.srt", "a_fr_base.json"} <= set(names(tmp_path))
+        assert not any("_diarized" in n for n in names(tmp_path))
+        data = json.loads((tmp_path / "a_fr_base.json").read_text(encoding="utf-8"))
+        assert data["language"] == "fr" and len(data["segments"]) == 3
+
+    def test_the_file_counts_as_a_success_and_the_user_is_told(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch, diarize_error=RuntimeError("mémoire insuffisante"))
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        received = codes(run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"]))
+        assert received.count("diarization_failed") == 2        # une fois par fichier concerné
+        assert received[-1] == "all_done" and not any(c.startswith("error:") for c in received)
+
+    def test_the_failure_is_logged_with_its_cause(self, monkeypatch, tmp_path, ready_model, ui_lang, caplog):
+        FakeEngine(monkeypatch, diarize_error=RuntimeError("mémoire insuffisante"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        with caplog.at_level(logging.ERROR, logger="autotranscript.transcriber"):
+            run(T.Transcriber(), source, diarize=True, formats=["txt"])
+        assert "Identification des locuteurs impossible" in caplog.text
+        assert "mémoire insuffisante" in caplog.text
+
+    def test_the_alignment_still_applies_to_the_degraded_output(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        """Seuls les locuteurs manquent : les horodatages par phrase obtenus avant l'échec sont conservés."""
+        FakeEngine(monkeypatch, diarize_error=RuntimeError("mémoire insuffisante"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        run(T.Transcriber(), source, diarize=True, formats=["txt"])
+        assert "[00:00:25.500 --> 00:00:31.000] Deuxieme phrase ?" in (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8")
+
+    def test_the_next_file_still_gets_its_speakers_when_the_failure_is_transient(self, monkeypatch, tmp_path,
+                                                                                 ready_model, ui_lang):
+        engine = FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        t, received = T.Transcriber(), []
+
+        def callback(code, pct):
+            received.append(code)
+            if code == "done_file:a_fr.wav":
+                engine.diarize_error = None                    # la panne ne dure qu'un fichier
+        engine.diarize_error = RuntimeError("panne passagère")
+        t.transcribe(str(tmp_path), "base", "", ["txt"], True, None, None, callback)
+        assert "a_fr_base.txt" in names(tmp_path) and "b_fr_base_diarized.txt" in names(tmp_path)
+
+    def test_a_cancellation_is_not_mistaken_for_a_failure(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        t = T.Transcriber()
+        received = []
+
+        def callback(code, pct):
+            received.append(code)
+            if code.startswith("done_file:"):
+                t.cancel()
+        t.transcribe(str(tmp_path), "base", "", ["txt"], True, None, None, callback)
+        assert "diarization_failed" not in received and received[-1] == "cancelled"
+
+
 class TestFolderHandling:
     def test_folder_is_processed_in_alphabetical_order_and_non_media_is_ignored(self, monkeypatch, tmp_path):
         FakeEngine(monkeypatch)
