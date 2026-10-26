@@ -69,6 +69,7 @@
   "log_diarization_model_ready": "Diarization model ready.",
   "log_aligning": "Aligning words: {file}",
   "log_diarizing": "Identifying speakers: {file}",
+  "log_align_unavailable": "Sentence timestamps unavailable (language \"{lang}\" or alignment model could not be downloaded): using segment timestamps. See the log for details.",
 
   "error_no_input": "Please select a file or folder.",
   "error_no_format": "Please select at least one output format.",

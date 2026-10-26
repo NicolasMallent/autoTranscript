@@ -106,14 +106,14 @@ chmod +x installer/install.sh
 
 ### `.txt` sans identification des locuteurs
 
-Texte découpé par segment avec les temps de début et de fin :
+Une ligne par **phrase**, avec ses temps de début et de fin (obtenus par alignement des mots sur l'audio) :
 
 ```
-[00:00:00.000 --> 00:00:06.240] Dans le bouquin, non,
-il y a une partie sur la lumière.
-
+[00:00:00.031 --> 00:00:06.240] Dans le bouquin, non, il y a une partie sur la lumière.
 [00:00:06.500 --> 00:00:11.100] Exactement, c'est ce dont je voulais parler.
 ```
+
+> Si l'alignement est impossible (langue sans modèle d'alignement, modèle non téléchargeable), l'application l'indique et revient à un horodatage par bloc de parole Whisper, plus long (plusieurs phrases par ligne).
 
 ### `.txt` avec identification des locuteurs
 

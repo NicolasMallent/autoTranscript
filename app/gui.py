@@ -521,6 +521,8 @@ class App(ctk.CTk):
                     self._log_append(i18n_mod.t("log_diarization_model_ready"))
                 elif msg.startswith("done_file:"):
                     self._log_append(i18n_mod.t("log_done_file", file=msg.split(":", 1)[1]))
+                elif msg.startswith("align_unavailable:"):
+                    self._log_append(i18n_mod.t("log_align_unavailable", lang=msg.split(":", 1)[1]))
                 elif msg == "all_done":
                     self._log_append(i18n_mod.t("log_all_done"))
                 elif msg.startswith("done_with_errors:"):

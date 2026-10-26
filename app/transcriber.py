@@ -118,12 +118,7 @@ def _write_txt_simple(segments: list, output_path: str) -> None:
         for seg in segments:
             start = _float_to_time(seg["start"])
             end = _float_to_time(seg["end"])
-            text = (
-                seg["text"]
-                .replace("... ", "...\n").replace(". ", ".\n")
-                .replace("! ", "!\n").replace("? ", "?\n")
-            )
-            f.write(f"\n[{start} --> {end}]{text}")
+            f.write(f"[{start} --> {end}] {seg['text'].strip()}\n")
 
 
 def _write_txt_speakers(segments: list, output_path: str) -> None:
@@ -457,6 +452,38 @@ class Transcriber:
             kwargs["batch_size"] = _BATCH_SIZE
         return self._model.transcribe(audio, **kwargs)
 
+    def _align(
+        self, result: dict, audio, language: str, file_path: str,
+        base_progress: float, file_progress: float, cb: Callable,
+    ) -> dict:
+        """
+        Aligne les mots sur l'audio : chaque segment devient une ou plusieurs phrases horodatées.
+
+        Args:
+            result: Résultat de ``_transcribe`` (clés ``segments`` et ``language``).
+            audio: Tableau audio chargé par ``whisperx.load_audio``.
+            language: Langue demandée par l'utilisateur, ou chaîne vide (détection automatique).
+            file_path: Fichier source (pour le message de progression).
+            base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
+            file_progress: Part de la progression totale que représente ce fichier.
+            cb: Callback de progression.
+
+        Returns:
+            Le résultat whisperx : ``segments`` (une entrée par phrase, avec ``words``) et
+            ``word_segments``.
+
+        Raises:
+            Exception: Si aucun modèle d'alignement n'existe pour la langue ou ne peut être
+                téléchargé (l'appelant décide s'il peut s'en passer).
+        """
+        import whisperx
+
+        detected_lang = result.get("language", language or "fr")
+        _logger.info("Langue utilisée pour l'alignement : %s", detected_lang)
+        cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * 0.4)
+        model_a, metadata = self._get_align_model(detected_lang)
+        return whisperx.align(result["segments"], model_a, metadata, audio, self._device)
+
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str, formats: list[str],
     ) -> list:
@@ -466,6 +493,17 @@ class Transcriber:
         else:
             audio = audio_path
         result = self._transcribe(audio, language)
+
+        if WHISPERX_AVAILABLE:
+            lang = result.get("language", language or "fr")
+            try:
+                aligned = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
+                result = {"language": lang, **aligned}
+            except Exception:
+                _logger.warning(
+                    "Alignement impossible (langue %s) : horodatage par segment", lang, exc_info=True,
+                )
+                cb(f"align_unavailable:{lang}", base_progress + file_progress * 0.4)
         segments = result["segments"]
 
         _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
@@ -482,12 +520,7 @@ class Transcriber:
 
         audio = whisperx.load_audio(audio_path)
         result = self._transcribe(audio, language)
-        detected_lang = result.get("language", language or "fr")
-        _logger.info("Langue utilisée pour l'alignement : %s", detected_lang)
-
-        cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * 0.4)
-        model_a, metadata = self._get_align_model(detected_lang)
-        result = whisperx.align(result["segments"], model_a, metadata, audio, self._device)
+        result = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
 
         cb(f"diarizing:{os.path.basename(file_path)}", base_progress + file_progress * 0.65)
         diarize_kwargs = {}
