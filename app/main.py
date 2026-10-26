@@ -7,6 +7,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # de huggingface_hub / pyannote, qui lisent ces variables au chargement)
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["PYANNOTE_METRICS_ENABLED"] = "false"
+# Téléchargement HuggingFace sans le protocole Xet : ses serveurs (*.xethub.hf.co) sont souvent
+# bloqués par les pare-feu d'entreprise. setdefault permet de le réactiver depuis l'environnement.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 import log_setup
 
