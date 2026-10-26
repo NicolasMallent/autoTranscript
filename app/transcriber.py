@@ -1,10 +1,14 @@
 import datetime
 import json
+import logging
 import os
 import platform
 import subprocess
 import tempfile
+import time
 from typing import Callable, Optional
+
+_logger = logging.getLogger("autotranscript.transcriber")
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"}
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".flv"}
@@ -18,6 +22,7 @@ try:
     WHISPERX_AVAILABLE = True
 except Exception:
     WHISPERX_AVAILABLE = False
+    _logger.warning("whisperx indisponible, repli sur openai-whisper sans diarisation", exc_info=True)
 
 
 def _find_ffmpeg() -> str:
@@ -126,6 +131,7 @@ class Transcriber:
     ) -> None:
         self._cancelled = False
         ffmpeg_bin = _find_ffmpeg()
+        _logger.info("ffmpeg : %s", ffmpeg_bin)
 
         if os.path.isdir(path):
             files = [
@@ -137,16 +143,21 @@ class Transcriber:
             files = [path]
 
         if not files:
+            _logger.warning("Aucun fichier audio/vidéo trouvé dans la sélection")
             progress_callback("no_audio_found", 1.0)
             return
+        _logger.info("%d fichier(s) à traiter", len(files))
 
         # diarize est impossible sans whisperx
+        if diarize and not WHISPERX_AVAILABLE:
+            _logger.warning("Diarisation demandée mais whisperx est indisponible : ignorée")
         diarize = diarize and WHISPERX_AVAILABLE
 
         if diarize:
             import model_setup
             model_setup.ensure_model(progress_callback)
             if self._cancelled:
+                _logger.info("Annulé pendant la préparation du modèle de diarisation")
                 return
 
         if WHISPERX_AVAILABLE:
@@ -156,10 +167,17 @@ class Transcriber:
 
         for i, file_path in enumerate(files):
             if self._cancelled:
+                _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
                 break
 
             base_progress = i / len(files)
             file_progress = 1.0 / len(files)
+            started = time.monotonic()
+            # Pas de nom de fichier dans le log (il peut être partagé) : index et extension seulement
+            _logger.info(
+                "Fichier %d/%d (%s) : début", i + 1, len(files),
+                os.path.splitext(file_path)[1].lower(),
+            )
             progress_callback(f"processing_file:{os.path.basename(file_path)}", base_progress)
 
             tmp_audio = None
@@ -189,9 +207,14 @@ class Transcriber:
                 if tmp_audio and os.path.exists(tmp_audio):
                     os.unlink(tmp_audio)
 
+            _logger.info(
+                "Fichier %d/%d : terminé en %.1f s (%d segments)",
+                i + 1, len(files), time.monotonic() - started, len(segments),
+            )
             progress_callback(f"done_file:{os.path.basename(file_path)}", base_progress + file_progress)
 
         if not self._cancelled:
+            _logger.info("Toutes les transcriptions sont terminées")
             progress_callback("all_done", 1.0)
 
     # ── private ──────────────────────────────────────────────────────────────
@@ -205,8 +228,12 @@ class Transcriber:
 
         if self._model_name != model_name or self._model is None:
             cb(f"loading_model:{model_name}", 0.0)
+            _logger.info("Chargement du modèle whisperx %s (device=%s, compute_type=%s)",
+                         model_name, device, compute_type)
+            started = time.monotonic()
             self._model = whisperx.load_model(model_name, device, compute_type=compute_type)
             self._model_name = model_name
+            _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
         self._device = device
 
     def _load_openai_whisper_model(self, model_name: str, cb: Callable) -> None:
@@ -214,8 +241,11 @@ class Transcriber:
 
         if self._model_name != model_name or self._model is None:
             cb(f"loading_model:{model_name}", 0.0)
+            _logger.info("Chargement du modèle openai-whisper %s", model_name)
+            started = time.monotonic()
             self._model = whisper.load_model(model_name)
             self._model_name = model_name
+            _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
 
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str,
@@ -275,6 +305,7 @@ class Transcriber:
             kwargs["language"] = language
         result = self._model.transcribe(audio, **kwargs)
         detected_lang = result.get("language", language or "fr")
+        _logger.info("Langue utilisée pour l'alignement : %s", detected_lang)
 
         cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * 0.4)
         model_a, metadata = whisperx.load_align_model(language_code=detected_lang, device=self._device)
@@ -287,6 +318,7 @@ class Transcriber:
             diarize_kwargs["min_speakers"] = min_speakers
         if max_speakers:
             diarize_kwargs["max_speakers"] = max_speakers
+        _logger.info("Diarisation (min=%s, max=%s)", min_speakers, max_speakers)
         diarize_model = DiarizationPipeline(
             model_name="pyannote/speaker-diarization-3.1", device=self._device
         )

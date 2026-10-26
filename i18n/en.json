@@ -34,6 +34,13 @@
   "settings_language_label": "Interface language",
   "settings_language_fr": "Français",
   "settings_language_en": "English",
+  "settings_logs_label": "Log",
+  "settings_logs_open": "Open logs folder",
+  "settings_logs_copy": "Copy log path",
+  "settings_logs_hint": "If something goes wrong, attach the autotranscript.log file to your report. File names and tokens are not recorded in it.",
+  "settings_debug_label": "Debug mode (detailed log)",
+  "log_path_copied": "Log path copied: {path}",
+  "error_open_logs": "Could not open the logs folder. It is located here:\n{path}",
 
   "about_description": "Automatic transcription of audio and video files with speaker identification.\nFully local processing — GDPR compliant.",
   "about_authors_title": "Authors",

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import queue
 import threading
@@ -9,7 +10,10 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 import i18n as i18n_mod
+import log_setup
 from transcriber import Transcriber, WHISPERX_AVAILABLE, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
+
+_logger = logging.getLogger("autotranscript.gui")
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".autotranscript", "config.json")
@@ -54,6 +58,8 @@ class App(ctk.CTk):
         super().__init__()
 
         self._config = _load_config()
+        log_setup.set_debug(self._config.get("debug", False))
+        log_setup.log_environment(_VERSION)
         i18n_mod.load(self._config.get("lang", "fr"))
         self._models = _load_models()
         self._transcriber = Transcriber()
@@ -70,6 +76,10 @@ class App(ctk.CTk):
 
         self._build_ui()
         self._poll_queue()
+
+    def report_callback_exception(self, exc, val, tb) -> None:
+        """Journalise les exceptions levées dans les callbacks Tk (sinon perdues sur stderr)."""
+        _logger.error("Exception dans un callback Tk", exc_info=(exc, val, tb))
 
     def _build_ui(self):
         self._tabview = ctk.CTkTabview(self)
@@ -251,6 +261,29 @@ class App(ctk.CTk):
             state="readonly", width=160, command=self._on_lang_change,
         ).grid(row=0, column=1, sticky="w", padx=16, pady=(20, 0))
 
+        # --- Journal (fichier de log à joindre à un signalement) ---
+        ctk.CTkLabel(parent, text=i18n_mod.t("settings_logs_label")).grid(
+            row=1, column=0, sticky="nw", padx=16, pady=(20, 0)
+        )
+        logs_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        logs_frame.grid(row=1, column=1, sticky="w", padx=16, pady=(20, 0))
+        ctk.CTkButton(
+            logs_frame, text=i18n_mod.t("settings_logs_open"), width=210, command=self._on_open_logs,
+        ).pack(anchor="w")
+        ctk.CTkButton(
+            logs_frame, text=i18n_mod.t("settings_logs_copy"), width=210, command=self._on_copy_log_path,
+        ).pack(anchor="w", pady=(6, 0))
+        ctk.CTkLabel(
+            logs_frame, text=i18n_mod.t("settings_logs_hint"),
+            font=ctk.CTkFont(size=11), text_color="gray60", wraplength=420, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+        self._debug_var = tk.BooleanVar(value=self._config.get("debug", False))
+        ctk.CTkCheckBox(
+            parent, text=i18n_mod.t("settings_debug_label"),
+            variable=self._debug_var, command=self._on_debug_toggle,
+        ).grid(row=2, column=1, sticky="w", padx=16, pady=(14, 0))
+
     def _build_about_tab(self, parent):
         frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=16, pady=12)
@@ -303,6 +336,24 @@ class App(ctk.CTk):
         self._log.insert("end", message + "\n")
         self._log.see("end")
         self._log.configure(state="disabled")
+
+    def _on_open_logs(self) -> None:
+        if not log_setup.open_log_folder():
+            messagebox.showwarning(
+                "AutoTranscript", i18n_mod.t("error_open_logs", path=log_setup.LOG_DIR)
+            )
+
+    def _on_copy_log_path(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(str(log_setup.LOG_FILE))
+        self._log_append(i18n_mod.t("log_path_copied", path=log_setup.LOG_FILE))
+
+    def _on_debug_toggle(self) -> None:
+        enabled = self._debug_var.get()
+        self._config["debug"] = enabled
+        _save_config(self._config)
+        log_setup.set_debug(enabled)
+        _logger.info("Mode debug %s", "activé" if enabled else "désactivé")
 
     def _on_mode_change(self) -> None:
         mode = self._mode_var.get()
@@ -381,15 +432,24 @@ class App(ctk.CTk):
 
         diarize = self._diarize_var.get()
         min_sp, max_sp = self._selected_speakers()
+        language = self._selected_whisper_lang()
+
+        # Les noms de fichiers ne sont pas journalisés (le log est destiné à être partagé)
+        _logger.info(
+            "Transcription demandée : mode=%s modèle=%s langue=%s formats=%s "
+            "diarisation=%s locuteurs=%s-%s",
+            self._mode_var.get(), model_id, language or "auto", formats, diarize, min_sp, max_sp,
+        )
 
         def _run():
             try:
                 self._transcriber.transcribe(
-                    path, model_id, self._selected_whisper_lang(),
+                    path, model_id, language,
                     formats, diarize, min_sp, max_sp,
                     lambda msg, pct: self._queue.put((msg, pct)),
                 )
             except Exception as exc:
+                _logger.exception("La transcription a échoué")
                 self._queue.put((f"error:{exc}", 0.0))
             finally:
                 self._queue.put(("_done_", 1.0))

@@ -3,6 +3,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import log_setup
+
 if __name__ == "__main__":
     if "--check" in sys.argv:
         # Smoke test : vérifie que les fichiers et dépendances GUI sont présents
@@ -26,6 +28,8 @@ if __name__ == "__main__":
 
         print("OK")
         sys.exit(0)
+
+    log_setup.setup_logging()
 
     from gui import App
     app = App()
