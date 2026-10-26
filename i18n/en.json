@@ -11,6 +11,8 @@
   "no_folder_selected": "No folder selected",
   "file_dialog_title": "Select an audio or video file",
   "folder_dialog_title": "Select a folder",
+  "file_types_media": "Audio / Video",
+  "file_types_all": "All files",
 
   "model_label": "AI Model",
   "language_label": "Transcription language",

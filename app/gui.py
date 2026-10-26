@@ -7,6 +7,7 @@ import threading
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox
+from typing import NamedTuple
 
 import customtkinter as ctk
 
@@ -46,6 +47,76 @@ _DEFAULT_CONFIG = {
     "last_formats": ["txt", "srt"],
     "last_mode": "file",
 }
+
+# Message de fin de thread : réactive les boutons (envoyé même après une erreur ou une annulation)
+_DONE = "_done_"
+
+# Messages du thread de transcription : « <événement>:<argument> » ou « <événement> » seul.
+# Chaque code émis par transcriber.py / model_setup.py doit figurer ici (test de contrat).
+_EVENTS_WITH_ARGUMENT = {            # événement: (clé i18n, nom du paramètre du texte)
+    "loading_model": ("log_loading_model", "model"),
+    "processing_file": ("log_processing_file", "file"),
+    "extracting_audio": ("log_extracting_audio", "file"),
+    "aligning": ("log_aligning", "file"),
+    "diarizing": ("log_diarizing", "file"),
+    "done_file": ("log_done_file", "file"),
+    "align_unavailable": ("log_align_unavailable", "lang"),
+    "error": ("log_error", "error"),
+}
+_EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
+    "all_done": "log_all_done",
+    "cancelled": "log_cancelled",
+    "no_audio_found": "log_no_audio_found",
+    "diarization_model_connecting": "log_diarization_model_connecting",
+    "diarization_model_extracting": "log_diarization_model_extracting",
+    "diarization_model_ready": "log_diarization_model_ready",
+    "diarization_model_cached": "log_diarization_model_ready",
+}
+_EVENTS_WITH_COUNTS = {              # événement: (clé i18n, (paramètres), remplace la dernière ligne ?)
+    "done_with_errors": ("log_done_with_errors", ("failed", "total"), False),
+    "diarization_model_dl": ("log_diarization_model_dl", ("done", "total"), True),
+}
+
+
+class _LogLine(NamedTuple):
+    """Ligne de journal à afficher : clé i18n, paramètres, et s'il faut remplacer la dernière ligne."""
+
+    key: str
+    params: dict
+    replace_last: bool = False
+
+
+def _translate_message(msg: str) -> "_LogLine | None":
+    """
+    Traduit un message du thread de transcription en ligne de journal.
+
+    Args:
+        msg: Code reçu par la queue : ``all_done``, ``processing_file:a.mp3``,
+            ``done_with_errors:1/3``, etc. L'argument est tout ce qui suit le premier « : ».
+
+    Returns:
+        La ligne à afficher, ou None si le code est inconnu ou mal formé (ignoré par la fenêtre).
+    """
+    event, separator, argument = msg.partition(":")
+    if not separator:
+        key = _EVENTS_WITHOUT_ARGUMENT.get(msg)
+        return _LogLine(key, {}) if key else None
+    if event in _EVENTS_WITH_ARGUMENT:
+        key, parameter = _EVENTS_WITH_ARGUMENT[event]
+        return _LogLine(key, {parameter: argument})
+    if event in _EVENTS_WITH_COUNTS:
+        key, (first, second), replace_last = _EVENTS_WITH_COUNTS[event]
+        left, slash, right = argument.partition("/")
+        if not slash:
+            return None
+        return _LogLine(key, {first: left, second: right}, replace_last)
+    return None
+
+
+def _file_dialog_filetypes() -> list[tuple[str, str]]:
+    """Filtres du sélecteur de fichier : médias pris en charge, puis tous les fichiers."""
+    patterns = " ".join(f"*{extension}" for extension in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
+    return [(i18n_mod.t("file_types_media"), patterns), (i18n_mod.t("file_types_all"), "*.*")]
 
 
 def _load_models() -> list[dict]:
@@ -501,10 +572,8 @@ class App(ctk.CTk):
 
     def _on_select(self) -> None:
         if self._mode_var.get() == "file":
-            exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
             path = filedialog.askopenfilename(
-                title=i18n_mod.t("file_dialog_title"),
-                filetypes=[("Audio / Vidéo", exts), ("Tous les fichiers", "*.*")],
+                title=i18n_mod.t("file_dialog_title"), filetypes=_file_dialog_filetypes(),
             )
         else:
             path = filedialog.askdirectory(title=i18n_mod.t("folder_dialog_title"))
@@ -618,7 +687,7 @@ class App(ctk.CTk):
                 _logger.exception("La transcription a échoué")
                 self._queue.put((f"error:{exc}", 0.0))
             finally:
-                self._queue.put(("_done_", 1.0))
+                self._queue.put((_DONE, 1.0))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -647,61 +716,55 @@ class App(ctk.CTk):
         self._tabview.destroy()
         self._build_ui()
 
+    def _log_replace_last(self, text: str) -> None:
+        """Remplace la dernière ligne du journal (progression d'un téléchargement) au lieu d'en ajouter une."""
+        self._log.configure(state="normal")
+        self._log.delete("end-2l", "end-1c")
+        self._log.insert("end", text + "\n")
+        self._log.see("end")
+        self._log.configure(state="disabled")
+
+    def _show_log_line(self, line: _LogLine) -> None:
+        """Affiche une ligne de journal traduite dans la langue de l'interface."""
+        text = i18n_mod.t(line.key, **line.params)
+        if line.replace_last:
+            self._log_replace_last(text)
+        else:
+            self._log_append(text)
+
+    def _handle_message(self, msg: str, pct: float) -> None:
+        """
+        Applique un message du thread de transcription à l'interface.
+
+        ``_done_`` réactive les boutons sans toucher à la barre : après une erreur ou une annulation,
+        elle ne doit pas se remplir à 100 %. Un code inconnu n'écrit rien, mais la barre le suit.
+        """
+        if msg == _DONE:
+            self._running = False
+            self._transcribe_btn.configure(state="normal")
+            self._cancel_btn.configure(state="disabled")
+            return
+        self._progress.set(pct)
+        line = _translate_message(msg)
+        if line is not None:
+            self._show_log_line(line)
+
     def _poll_queue(self) -> None:
         """
         Vide la queue de messages du thread de transcription et met à jour l'interface.
 
-        Chaque message est un couple (code, progression). Le code est soit un mot seul
-        (``all_done``), soit ``<événement>:<argument>`` (``processing_file:interview.mp3``) ; il est
-        traduit en ligne de journal via l'i18n. Se reprogramme toutes les 100 ms.
+        Chaque message est un couple (code, progression), traduit par ``_translate_message``. Une
+        erreur sur un message est journalisée sans interrompre la boucle : sinon les boutons ne
+        seraient jamais réactivés. Se reprogramme toutes les 100 ms.
         """
         try:
             while True:
                 msg, pct = self._queue.get_nowait()
-                if msg == "_done_":
-                    self._running = False
-                    self._transcribe_btn.configure(state="normal")
-                    self._cancel_btn.configure(state="disabled")
-                elif msg.startswith("loading_model:"):
-                    self._log_append(i18n_mod.t("log_loading_model", model=msg.split(":", 1)[1]))
-                elif msg.startswith("processing_file:"):
-                    self._log_append(i18n_mod.t("log_processing_file", file=msg.split(":", 1)[1]))
-                elif msg.startswith("extracting_audio:"):
-                    self._log_append(i18n_mod.t("log_extracting_audio", file=msg.split(":", 1)[1]))
-                elif msg.startswith("aligning:"):
-                    self._log_append(i18n_mod.t("log_aligning", file=msg.split(":", 1)[1]))
-                elif msg.startswith("diarizing:"):
-                    self._log_append(i18n_mod.t("log_diarizing", file=msg.split(":", 1)[1]))
-                elif msg == "diarization_model_connecting":
-                    self._log_append(i18n_mod.t("log_diarization_model_connecting"))
-                elif msg.startswith("diarization_model_dl:"):
-                    parts = msg.split(":", 1)[1].split("/")
-                    self._log.configure(state="normal")
-                    # Mise à jour de la dernière ligne plutôt qu'ajout
-                    self._log.delete("end-2l", "end-1c")
-                    self._log.insert("end", i18n_mod.t("log_diarization_model_dl", done=parts[0], total=parts[1]) + "\n")
-                    self._log.see("end")
-                    self._log.configure(state="disabled")
-                elif msg == "diarization_model_extracting":
-                    self._log_append(i18n_mod.t("log_diarization_model_extracting"))
-                elif msg in ("diarization_model_ready", "diarization_model_cached"):
-                    self._log_append(i18n_mod.t("log_diarization_model_ready"))
-                elif msg.startswith("done_file:"):
-                    self._log_append(i18n_mod.t("log_done_file", file=msg.split(":", 1)[1]))
-                elif msg.startswith("align_unavailable:"):
-                    self._log_append(i18n_mod.t("log_align_unavailable", lang=msg.split(":", 1)[1]))
-                elif msg == "cancelled":
-                    self._log_append(i18n_mod.t("log_cancelled"))
-                elif msg == "all_done":
-                    self._log_append(i18n_mod.t("log_all_done"))
-                elif msg.startswith("done_with_errors:"):
-                    failed, total = msg.split(":", 1)[1].split("/")
-                    self._log_append(i18n_mod.t("log_done_with_errors", failed=failed, total=total))
-                elif msg == "no_audio_found":
-                    self._log_append(i18n_mod.t("log_no_audio_found"))
-                elif msg.startswith("error:"):
-                    self._log_append(i18n_mod.t("log_error", error=msg.split(":", 1)[1]))
-                self._progress.set(pct)
+                try:
+                    self._handle_message(msg, pct)
+                except Exception:
+                    # Seul l'événement est journalisé : l'argument peut contenir un nom de fichier
+                    _logger.exception("Message de la transcription non traité (%s)", msg.partition(":")[0])
         except queue.Empty:
             pass
         self.after(100, self._poll_queue)

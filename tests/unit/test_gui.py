@@ -7,6 +7,7 @@ Aucune fenêtre n'est ouverte (pas d'écran requis) : les méthodes de App sont 
 import json
 import logging
 import os
+import queue
 import types
 
 import pytest
@@ -486,3 +487,161 @@ class TestSafeScrollableFrame:
 
     def test_unrelated_widget_is_not_valid(self, frame):
         assert frame._check_if_valid_scroll(types.SimpleNamespace(id="autre", master=None)) is False
+
+
+class TestTranslateMessage:
+    """Traduction des codes envoyés par le thread de transcription en lignes de journal."""
+
+    @pytest.mark.parametrize("message, key, params", [
+        ("loading_model:large-v3", "log_loading_model", {"model": "large-v3"}),
+        ("processing_file:a.mp3", "log_processing_file", {"file": "a.mp3"}),
+        ("extracting_audio:film.mp4", "log_extracting_audio", {"file": "film.mp4"}),
+        ("aligning:a.mp3", "log_aligning", {"file": "a.mp3"}),
+        ("diarizing:a.mp3", "log_diarizing", {"file": "a.mp3"}),
+        ("done_file:a.mp3", "log_done_file", {"file": "a.mp3"}),
+        ("align_unavailable:xx", "log_align_unavailable", {"lang": "xx"}),
+        ("error:panne", "log_error", {"error": "panne"}),
+    ])
+    def test_events_with_an_argument(self, message, key, params):
+        assert gui._translate_message(message) == gui._LogLine(key, params)
+
+    @pytest.mark.parametrize("message, key", [
+        ("all_done", "log_all_done"),
+        ("cancelled", "log_cancelled"),
+        ("no_audio_found", "log_no_audio_found"),
+        ("diarization_model_connecting", "log_diarization_model_connecting"),
+        ("diarization_model_extracting", "log_diarization_model_extracting"),
+        ("diarization_model_ready", "log_diarization_model_ready"),
+        ("diarization_model_cached", "log_diarization_model_ready"),
+    ])
+    def test_events_without_an_argument(self, message, key):
+        assert gui._translate_message(message) == gui._LogLine(key, {})
+
+    def test_counts(self):
+        assert gui._translate_message("done_with_errors:2/5") == gui._LogLine(
+            "log_done_with_errors", {"failed": "2", "total": "5"})
+
+    def test_download_progress_replaces_the_last_line(self):
+        assert gui._translate_message("diarization_model_dl:12/34") == gui._LogLine(
+            "log_diarization_model_dl", {"done": "12", "total": "34"}, replace_last=True)
+
+    def test_argument_may_contain_colons_and_spaces(self):
+        line = gui._translate_message("error:a:b.mp4 — ffmpeg failed (exit code 1): boom")
+        assert line.params == {"error": "a:b.mp4 — ffmpeg failed (exit code 1): boom"}
+
+    def test_empty_argument(self):
+        assert gui._translate_message("processing_file:").params == {"file": ""}
+
+    @pytest.mark.parametrize("message", ["", "_done_", "inconnu", "inconnu:arg", ":", "done_with_errors:3",
+                                         "diarization_model_dl:sans-barre"])
+    def test_unknown_or_malformed_messages_are_ignored(self, message):
+        assert gui._translate_message(message) is None
+
+    def test_a_no_argument_event_with_an_argument_is_ignored(self):
+        assert gui._translate_message("all_done:x") is None
+
+
+class FakeLog:
+    """Faux CTkTextbox : garde la suite des opérations."""
+
+    def __init__(self):
+        self.operations = []
+
+    def configure(self, **options):
+        self.operations.append(("configure", options))
+
+    def delete(self, start, end):
+        self.operations.append(("delete", start, end))
+
+    def insert(self, index, text):
+        self.operations.append(("insert", index, text))
+
+    def see(self, index):
+        self.operations.append(("see", index))
+
+
+class TestPollQueue:
+    @pytest.fixture
+    def env(self, ui_lang):
+        lines, bar, scheduled = [], [], []
+        app = types.SimpleNamespace(
+            _queue=queue.Queue(), _log=FakeLog(), _running=True,
+            _transcribe_btn=Widget(), _cancel_btn=Widget(),
+            _progress=types.SimpleNamespace(set=bar.append),
+            _log_append=lines.append, after=lambda delay, callback: scheduled.append(delay),
+        )
+        for name in ("_poll_queue", "_handle_message", "_show_log_line", "_log_replace_last"):
+            setattr(app, name, getattr(gui.App, name).__get__(app))
+        return types.SimpleNamespace(app=app, lines=lines, bar=bar, scheduled=scheduled, ui=ui_lang)
+
+    def poll(self, env, *messages):
+        for message in messages:
+            env.app._queue.put(message)
+        gui.App._poll_queue(env.app)
+
+    def test_message_becomes_a_journal_line_and_moves_the_bar(self, env):
+        self.poll(env, ("processing_file:a.mp3", 0.25))
+        assert env.lines == ["Traitement : a.mp3"] and env.bar == [0.25]
+
+    def test_every_pending_message_is_handled_in_order(self, env):
+        self.poll(env, ("processing_file:a.mp3", 0.0), ("done_file:a.mp3", 0.5), ("all_done", 1.0))
+        assert env.lines == ["Traitement : a.mp3", "Terminé : a.mp3", env.ui.t("log_all_done")]
+        assert env.bar == [0.0, 0.5, 1.0]
+
+    def test_the_poll_is_rescheduled_even_when_the_queue_is_empty(self, env):
+        self.poll(env)
+        assert env.scheduled == [100] and env.lines == [] and env.bar == []
+
+    def test_done_releases_the_buttons_without_touching_the_bar(self, env):
+        """Après une erreur ou une annulation, la barre ne doit pas se remplir à 100 %."""
+        self.poll(env, ("cancelled", 0.25), ("_done_", 1.0))
+        assert env.app._running is False
+        assert env.app._transcribe_btn.options == {"state": "normal"}
+        assert env.app._cancel_btn.options == {"state": "disabled"}
+        assert env.bar == [0.25] and env.lines == [env.ui.t("log_cancelled")]
+
+    def test_unknown_message_is_ignored_but_the_bar_still_follows(self, env):
+        self.poll(env, ("inconnu:x", 0.5))
+        assert env.lines == [] and env.bar == [0.5]
+
+    def test_download_progress_updates_the_last_line_in_place(self, env):
+        self.poll(env, ("diarization_model_dl:12/34", 0.3))
+        assert env.lines == []   # pas de nouvelle ligne
+        text = env.ui.t("log_diarization_model_dl", done="12", total="34") + "\n"
+        assert env.app._log.operations == [
+            ("configure", {"state": "normal"}), ("delete", "end-2l", "end-1c"),
+            ("insert", "end", text), ("see", "end"), ("configure", {"state": "disabled"})]
+
+    def test_counts_are_formatted(self, env):
+        self.poll(env, ("done_with_errors:1/3", 1.0))
+        assert env.lines == [env.ui.t("log_done_with_errors", failed="1", total="3")]
+
+    def test_a_failing_handler_does_not_stop_the_polling(self, env, caplog):
+        def broken(message):
+            raise RuntimeError("zone de texte détruite")
+        env.app._log_append = broken
+        with caplog.at_level(logging.ERROR, logger="autotranscript.gui"):
+            self.poll(env, ("all_done", 1.0), ("_done_", 1.0))
+        assert env.app._running is False          # le message suivant a bien été traité
+        assert env.scheduled == [100]              # et la boucle continue
+        assert "zone de texte détruite" in caplog.text
+
+    def test_language_follows_the_interface(self, env, ui_lang):
+        ui_lang.load("en")
+        self.poll(env, ("processing_file:a.mp3", 0.0))
+        assert env.lines == ["Processing: a.mp3"]
+
+
+class TestFileTypes:
+    def test_labels_are_translated(self, ui_lang):
+        assert [label for label, _ in gui._file_dialog_filetypes()] == ["Audio / Vidéo", "Tous les fichiers"]
+        ui_lang.load("en")
+        assert [label for label, _ in gui._file_dialog_filetypes()] == ["Audio / Video", "All files"]
+
+    def test_every_supported_extension_is_offered(self, ui_lang):
+        patterns = gui._file_dialog_filetypes()[0][1].split()
+        for extension in gui.AUDIO_EXTENSIONS | gui.VIDEO_EXTENSIONS:
+            assert f"*{extension}" in patterns
+
+    def test_last_choice_shows_everything(self, ui_lang):
+        assert gui._file_dialog_filetypes()[-1][1] == "*.*"

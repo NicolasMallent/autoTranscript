@@ -11,6 +11,8 @@
   "no_folder_selected": "Aucun dossier sélectionné",
   "file_dialog_title": "Sélectionner un fichier audio ou vidéo",
   "folder_dialog_title": "Sélectionner un dossier",
+  "file_types_media": "Audio / Vidéo",
+  "file_types_all": "Tous les fichiers",
 
   "model_label": "Modèle IA",
   "language_label": "Langue de transcription",
