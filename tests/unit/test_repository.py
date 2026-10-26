@@ -16,6 +16,13 @@ def git(project_root, *args):
     return subprocess.run(["git", *args], cwd=project_root, capture_output=True, text=True)
 
 
+@pytest.fixture(autouse=True)
+def inside_git_work_tree(project_root):
+    """Ces contrôles n'ont de sens que dans un dépôt git (pas dans une archive téléchargée)."""
+    if git(project_root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        pytest.skip("pas un dépôt git (archive téléchargée ?)")
+
+
 @pytest.fixture
 def tracked(project_root):
     result = git(project_root, "ls-files", "-z")
