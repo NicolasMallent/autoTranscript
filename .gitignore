@@ -162,3 +162,8 @@ cython_debug/
 #.idea/
 
 pyannote-community-1
+
+# Binaires ffmpeg : téléchargés par le CI et l'installateur, jamais versionnés (les .gitkeep restent)
+ffmpeg/windows/*.zip
+ffmpeg/windows/ffmpeg.exe
+ffmpeg/linux/ffmpeg

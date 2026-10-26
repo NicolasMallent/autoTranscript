@@ -49,6 +49,20 @@ def test_check_does_not_open_a_window_nor_write_a_log(home, project_root):
     assert not (home / ".autotranscript").exists()
 
 
+def test_check_passes_in_isolated_mode_like_the_embedded_windows_python(home, project_root):
+    """
+    Le Python embarqué de Windows tourne en mode isolé (fichier ._pth) : le dossier du script n'est
+    pas dans ``sys.path``. C'est le ``sys.path.insert`` de app/main.py qui permet les imports à plat
+    (``import log_setup``) : il ne doit pas être retiré sans tester une installation Windows.
+    """
+    pytest.importorskip("tkinter")
+    pytest.importorskip("customtkinter")
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
+    result = subprocess.run([sys.executable, "-I", str(project_root / "app" / "main.py"), "--check"],
+                            env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0 and result.stdout.strip() == "OK", result.stderr
+
+
 def test_telemetry_is_disabled_and_xet_is_off_by_default(home, project_root):
     result = import_main_and_print_env(home, project_root)
     assert result.returncode == 0, result.stderr

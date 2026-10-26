@@ -2,6 +2,10 @@
 import os
 import sys
 
+# Les modules de app/ s'importent « à plat » (import log_setup, import gui…). Ce chemin est ajouté
+# explicitement car le Python embarqué de Windows tourne en mode isolé (fichier ._pth) : le dossier
+# du script n'y est pas dans sys.path. Ne pas le retirer sans tester une installation Windows
+# (tests/functional/test_main_functional.py le vérifie avec « python -I »).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Aucune télémétrie : promesse « entièrement local » du README (à définir avant tout import
