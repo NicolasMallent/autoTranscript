@@ -94,7 +94,7 @@ chmod +x installer/install.sh
 
 4. **Identification des locuteurs** (cochée par défaut) : l'application détecte automatiquement les changements d'interlocuteur et étiquette chaque prise de parole (*Locuteur 1*, *Locuteur 2*…).  
    Vous pouvez indiquer le nombre minimum et maximum de locuteurs si vous le connaissez.  
-   > Au premier usage, l'application télécharge le modèle de diarisation (~400 Mo) et le met en cache.
+   > Au premier usage, l'application télécharge le modèle de diarisation (~35 Mo) depuis les Releases de ce dépôt et le met en cache. Aucun compte HuggingFace n'est nécessaire.
 
 5. **Sélectionnez le(s) format(s) de sortie** souhaités.
 
@@ -170,11 +170,20 @@ Contributeur :
 | [Whisper AI](https://github.com/openai/whisper) | OpenAI | MIT |
 | [WhisperX](https://github.com/m-bain/whisperX) | Max Bain et al. | BSD-4 |
 | [pyannote.audio](https://github.com/pyannote/pyannote-audio) | Hervé Bredin et al., pyannoteAI | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) (modèle) | Hervé Bredin et al., pyannoteAI | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | [ffmpeg](https://ffmpeg.org) | FFmpeg team | LGPL / GPL |
 
 L'utilisation du modèle de diarisation **pyannote.audio** est soumise à la licence [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Conformément à cette licence, le crédit suivant est requis :
 
 > *Bredin, H., et al. (2023). pyannote.audio 2.1 speaker diarization pipeline. pyannoteAI.*
+
+Le modèle `pyannote/speaker-diarization-community-1` est **redistribué sans modification** dans les [Releases](https://github.com/NicolasMallent/autoTranscript/releases) de ce dépôt (fichier `pyannote-community-1.zip`, avec son empreinte SHA-256 et un fichier `LICENSE-NOTICE.txt`), conformément à sa licence CC BY 4.0. Source : [huggingface.co/pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1).
+
+---
+
+## Journal (log) et assistance
+
+L'application écrit un journal dans `~/.autotranscript/logs/autotranscript.log` (sous Windows : `%USERPROFILE%\.autotranscript\logs`). En cas de problème, joignez ce fichier à votre signalement : les noms de fichiers et les tokens n'y sont pas enregistrés. L'onglet **Paramètres** permet d'ouvrir le dossier des logs et d'activer un mode debug plus détaillé.
 
 ---
 

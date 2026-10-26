@@ -3,6 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Aucune télémétrie : promesse « entièrement local » du README (à définir avant tout import
+# de huggingface_hub / pyannote, qui lisent ces variables au chargement)
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+os.environ["PYANNOTE_METRICS_ENABLED"] = "false"
+
 import log_setup
 
 if __name__ == "__main__":

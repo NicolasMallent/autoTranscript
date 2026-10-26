@@ -8,6 +8,8 @@ import tempfile
 import time
 from typing import Callable, Optional
 
+import model_setup
+
 _logger = logging.getLogger("autotranscript.transcriber")
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"}
@@ -154,7 +156,6 @@ class Transcriber:
         diarize = diarize and WHISPERX_AVAILABLE
 
         if diarize:
-            import model_setup
             model_setup.ensure_model(progress_callback)
             if self._cancelled:
                 _logger.info("Annulé pendant la préparation du modèle de diarisation")
@@ -247,6 +248,32 @@ class Transcriber:
             self._model_name = model_name
             _logger.info("Modèle chargé en %.1f s", time.monotonic() - started)
 
+    def _load_diarization_pipeline(self, pipeline_class):
+        """
+        Charge la pipeline pyannote depuis le dossier local du modèle.
+
+        Le dossier est passé à pyannote à la place d'un identifiant HuggingFace : aucun
+        accès réseau ni token n'est nécessaire.
+
+        Args:
+            pipeline_class: Classe ``whisperx.diarize.DiarizationPipeline``.
+
+        Returns:
+            L'instance de pipeline prête à être appelée.
+
+        Raises:
+            RuntimeError: Si le modèle est absent ou ne peut pas être chargé.
+        """
+        model_dir = model_setup.model_path()
+        if not model_setup.is_model_ready():
+            raise RuntimeError(f"Diarization model not found in {model_dir}")
+        _logger.info("Chargement de la pipeline de diarisation depuis %s", model_dir)
+        try:
+            return pipeline_class(model_name=str(model_dir), device=self._device)
+        except Exception as exc:
+            _logger.exception("Echec du chargement de la pipeline de diarisation")
+            raise RuntimeError(f"Cannot load the diarization model from {model_dir}: {exc}") from exc
+
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str,
         formats: list[str], cb: Callable,
@@ -319,9 +346,7 @@ class Transcriber:
         if max_speakers:
             diarize_kwargs["max_speakers"] = max_speakers
         _logger.info("Diarisation (min=%s, max=%s)", min_speakers, max_speakers)
-        diarize_model = DiarizationPipeline(
-            model_name="pyannote/speaker-diarization-3.1", device=self._device
-        )
+        diarize_model = self._load_diarization_pipeline(DiarizationPipeline)
         diarize_segments = diarize_model(audio, **diarize_kwargs)
         del diarize_model
 

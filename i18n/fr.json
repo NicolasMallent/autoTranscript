@@ -47,14 +47,14 @@
   "about_contributor_title": "Contributeur",
   "about_repo": "Dépôt GitHub",
   "about_credits_title": "Crédits",
-  "about_credits_body": "Identification des locuteurs assurée par pyannote.audio\n(Hervé Bredin et al., pyannoteAI — licence CC BY 4.0)\nhttps://github.com/pyannote/pyannote-audio\n\nTranscription vocale : WhisperX (Max Bain et al.) / Whisper AI (OpenAI)",
+  "about_credits_body": "Identification des locuteurs assurée par pyannote.audio\n(Hervé Bredin et al., pyannoteAI — licence CC BY 4.0)\nModèle : pyannote/speaker-diarization-community-1, redistribué sans modification\nhttps://github.com/pyannote/pyannote-audio\n\nTranscription vocale : WhisperX (Max Bain et al.) / Whisper AI (OpenAI)",
 
   "whisper_lang_french": "Français",
   "whisper_lang_english": "English",
   "whisper_lang_auto": "Détection automatique",
 
   "diarization_label": "Identifier les locuteurs",
-  "diarization_hint": "Télécharge un modèle (~400 Mo) au premier usage",
+  "diarization_hint": "Télécharge un modèle (~35 Mo) au premier usage",
   "diarization_unavailable": "Indisponible (nécessite Python 3.10–3.13)",
   "speakers_label": "Nombre de locuteurs (si connu) :",
   "speakers_min": "min",
