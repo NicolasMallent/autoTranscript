@@ -35,12 +35,14 @@ WHISPER_LANGUAGES = {
 
 
 def _load_models() -> list[dict]:
+    """Lit la liste des modèles Whisper proposés (models.json : id, taille, description fr/en)."""
     path = os.path.join(BASE_DIR, "models.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _load_config() -> dict:
+    """Lit la configuration utilisateur (langue, dernier modèle, mode debug), ou ses valeurs par défaut."""
     if os.path.exists(_CONFIG_PATH):
         with open(_CONFIG_PATH, encoding="utf-8") as f:
             return json.load(f)
@@ -48,6 +50,7 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict) -> None:
+    """Écrit la configuration utilisateur dans ~/.autotranscript/config.json."""
     os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
     with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -70,6 +73,13 @@ class _SafeScrollableFrame(ctk.CTkScrollableFrame):
 
 
 class App(ctk.CTk):
+    """
+    Fenêtre principale : onglets Transcription, Paramètres et À propos.
+
+    La transcription tourne dans un thread à part. Ce thread ne touche jamais aux widgets : il
+    dépose ses messages dans une queue, que ``_poll_queue`` vide toutes les 100 ms depuis le
+    thread de l'interface.
+    """
     def __init__(self):
         super().__init__()
 
@@ -402,6 +412,13 @@ class App(ctk.CTk):
         return self._model_var.get().split()[0]
 
     def _selected_whisper_lang(self) -> str:
+        """
+        Renvoie le code de la langue de transcription choisie dans la liste.
+
+        Returns:
+            « fr » ou « en », ou une chaîne vide pour la détection automatique (ou si le libellé
+            sélectionné est inconnu).
+        """
         label = self._whisper_lang_var.get()
         for key, value in WHISPER_LANGUAGES.items():
             if i18n_mod.t(key) == label:
@@ -419,6 +436,12 @@ class App(ctk.CTk):
         return formats
 
     def _selected_speakers(self) -> tuple[int | None, int | None]:
+        """
+        Lit les champs min/max de locuteurs.
+
+        Returns:
+            Le couple (min, max). Une valeur vide, non numérique ou inférieure à 1 vaut None.
+        """
         def _parse(v: str) -> int | None:
             try:
                 n = int(v.strip())
@@ -428,6 +451,12 @@ class App(ctk.CTk):
         return _parse(self._min_speakers_var.get()), _parse(self._max_speakers_var.get())
 
     def _on_transcribe(self) -> None:
+        """
+        Valide la saisie puis lance la transcription dans un thread.
+
+        Les erreurs sont journalisées et transmises à l'interface par la queue ; le message
+        ``_done_`` est toujours envoyé à la fin pour réactiver les boutons.
+        """
         path = self._selected_path.get()
         if not path:
             messagebox.showwarning("AutoTranscript", i18n_mod.t("error_no_input"))
@@ -476,6 +505,12 @@ class App(ctk.CTk):
         self._transcriber.cancel()
 
     def _on_lang_change(self, _=None) -> None:
+        """
+        Change la langue de l'interface, l'enregistre puis reconstruit les onglets.
+
+        La reconstruction réinitialise les réglages de l'onglet Transcription (formats, langue,
+        modèle) ; seul le chemin sélectionné est conservé.
+        """
         label = self._ui_lang_var.get()
         lang = "fr" if label == i18n_mod.t("settings_language_fr") else "en"
         self._config["lang"] = lang
@@ -488,6 +523,13 @@ class App(ctk.CTk):
         self._build_ui()
 
     def _poll_queue(self) -> None:
+        """
+        Vide la queue de messages du thread de transcription et met à jour l'interface.
+
+        Chaque message est un couple (code, progression). Le code est soit un mot seul
+        (``all_done``), soit ``<événement>:<argument>`` (``processing_file:interview.mp3``) ; il est
+        traduit en ligne de journal via l'i18n. Se reprogramme toutes les 100 ms.
+        """
         try:
             while True:
                 msg, pct = self._queue.get_nowait()

@@ -76,7 +76,19 @@ def _fetch_expected_sha256() -> str:
 
 
 def _download(zip_path: Path, progress_callback: ProgressCallback) -> str:
-    """Télécharge l'archive dans zip_path et renvoie son SHA-256."""
+    """
+    Télécharge l'archive du modèle dans ``zip_path`` en rapportant la progression.
+
+    Args:
+        zip_path: Fichier de destination.
+        progress_callback: Reçoit ``diarization_model_dl:<fait>/<total>`` en Mo (0 à 90 % de la barre).
+
+    Returns:
+        Le SHA-256 des octets reçus (hexadécimal), calculé au fil du téléchargement.
+
+    Raises:
+        RuntimeError: Si le serveur est injoignable ou ne répond pas dans le délai.
+    """
     digest = hashlib.sha256()
     try:
         with urllib.request.urlopen(_RELEASE_URL, timeout=_TIMEOUT_SECONDS) as response:
@@ -100,6 +112,21 @@ def _download(zip_path: Path, progress_callback: ProgressCallback) -> str:
 
 
 def _download_and_extract(progress_callback: ProgressCallback = None) -> None:
+    """
+    Télécharge, vérifie puis installe le modèle dans MODEL_DIR.
+
+    Tout se passe dans un dossier de travail voisin de MODEL_DIR (même disque) : le modèle n'est
+    déplacé en place qu'une fois l'empreinte SHA-256 et la liste des fichiers vérifiées, et
+    le dossier de travail est toujours supprimé. L'ancien cache des versions précédentes est
+    supprimé après l'installation.
+
+    Args:
+        progress_callback: Callback de progression (voir ``_download``).
+
+    Raises:
+        RuntimeError: Si l'empreinte est illisible ou ne correspond pas, si le réseau échoue
+            ou si l'archive est incomplète.
+    """
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Dossier de travail sur le même disque que MODEL_DIR, pour un déplacement atomique

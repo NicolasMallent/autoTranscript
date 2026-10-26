@@ -8,6 +8,12 @@ _current_lang: str = "fr"
 
 
 def load(lang: str) -> None:
+    """
+    Charge les textes de l'interface (i18n/<lang>.json).
+
+    Args:
+        lang: Code langue (« fr » ou « en »). Une langue sans fichier retombe sur « fr ».
+    """
     global _strings, _current_lang
     path = os.path.join(BASE_DIR, "i18n", f"{lang}.json")
     if not os.path.exists(path):
@@ -19,6 +25,16 @@ def load(lang: str) -> None:
 
 
 def t(key: str, **kwargs) -> str:
+    """
+    Renvoie le texte traduit d'une clé.
+
+    Args:
+        key: Clé du texte dans le fichier de langue.
+        **kwargs: Valeurs des champs ``{nom}`` du texte.
+
+    Returns:
+        Le texte formaté, ou la clé elle-même si elle n'existe pas dans la langue chargée.
+    """
     text = _strings.get(key, key)
     if kwargs:
         text = text.format(**kwargs)
@@ -26,4 +42,5 @@ def t(key: str, **kwargs) -> str:
 
 
 def current_lang() -> str:
+    """Renvoie le code de la langue chargée (« fr » ou « en »)."""
     return _current_lang

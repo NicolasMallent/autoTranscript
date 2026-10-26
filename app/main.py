@@ -1,3 +1,4 @@
+"""Point d'entrée : ``python app/main.py`` ouvre l'interface, ``--check`` vérifie l'installation."""
 import os
 import sys
 
