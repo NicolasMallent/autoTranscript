@@ -68,6 +68,17 @@ chmod +x installer/install.sh
 # puis :
 ./lancer.sh
 ```
+
+Tests (aucun modèle ni GPU requis : whisperx est simulé) :
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/                  # tout
+.venv/bin/python -m pytest tests/unit              # tests unitaires
+.venv/bin/python -m pytest tests/functional        # scénarios complets
+# test lent avec le vrai modèle de diarisation, hors ligne et sans token :
+AUTOTRANSCRIPT_MODEL_DIR=pyannote-community-1/speaker-diarization-community-1 .venv/bin/python -m pytest -m slow
+```
 </details>
 
 ---

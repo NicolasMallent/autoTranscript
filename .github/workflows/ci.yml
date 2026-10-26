@@ -11,6 +11,29 @@ on:
 jobs:
 
   # ─────────────────────────────────────────────
+  #  Tests unitaires et fonctionnels
+  #  whisperx / torch ne sont pas installés : les tests utilisent des faux
+  #  (tests/helpers.py) ; ceux qui ont besoin de tkinter ou customtkinter
+  #  sont ignorés s'ils sont absents.
+  # ─────────────────────────────────────────────
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances de test
+        run: |
+          sudo apt-get install -y python3-tk --quiet
+          pip install pytest customtkinter==6.0.0 huggingface_hub==0.36.2 --quiet
+
+      - name: Lancer les tests
+        run: python -m pytest tests -q
+
+  # ─────────────────────────────────────────────
   #  Windows — vérifie que le .exe se compile
   # ─────────────────────────────────────────────
   build-windows:
