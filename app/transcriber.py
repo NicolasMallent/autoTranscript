@@ -479,7 +479,9 @@ class Transcriber:
 
         if self._align_lang != lang:
             if self._align_model is not None:
-                self._align_model = self._align_metadata = None
+                # _align_lang est remis à zéro avec le modèle : si le chargement suivant échoue,
+                # la langue précédente doit être rechargée et non servie à vide
+                self._align_model = self._align_metadata = self._align_lang = None
                 self._free_memory()
             _logger.info("Chargement du modèle d'alignement (%s)", lang)
             self._align_model, self._align_metadata = whisperx.load_align_model(

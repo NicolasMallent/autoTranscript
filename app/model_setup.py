@@ -147,8 +147,10 @@ def _download_and_extract(progress_callback: ProgressCallback = None) -> None:
         with zipfile.ZipFile(zip_path) as archive:
             archive.extractall(extract_root)
 
-        contents = list(extract_root.iterdir())
-        source = contents[0] if len(contents) == 1 and contents[0].is_dir() else extract_root
+        # Le modèle est soit à la racine de l'archive, soit dans un sous-dossier (ignore les
+        # entrées parasites comme __MACOSX ou un fichier de licence à la racine)
+        candidates = [p for p in (extract_root, *extract_root.iterdir()) if (p / "config.yaml").is_file()]
+        source = candidates[0] if candidates else extract_root
 
         missing = [name for name in _REQUIRED_FILES if not (source / name).is_file()]
         if missing:
