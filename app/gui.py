@@ -53,6 +53,22 @@ def _save_config(cfg: dict) -> None:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
+class _SafeScrollableFrame(ctk.CTkScrollableFrame):
+    """
+    CTkScrollableFrame qui ignore les évènements de molette venant d'un widget non enregistré.
+
+    customtkinter 6.0.0 lève ``AttributeError: 'str' object has no attribute 'master'`` quand
+    la molette est utilisée sur un widget Tk que Python ne connaît que par son nom (par
+    exemple la liste déroulante d'une CTkComboBox) : son binding global sur la molette reçoit
+    alors ``event.widget`` sous forme de chaîne.
+    """
+
+    def _check_if_valid_scroll(self, widget):
+        if isinstance(widget, str):
+            return False
+        return super()._check_if_valid_scroll(widget)
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -285,7 +301,7 @@ class App(ctk.CTk):
         ).grid(row=2, column=1, sticky="w", padx=16, pady=(14, 0))
 
     def _build_about_tab(self, parent):
-        frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        frame = _SafeScrollableFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=16, pady=12)
 
         ctk.CTkLabel(frame, text="AutoTranscript", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", pady=(0, 2))
