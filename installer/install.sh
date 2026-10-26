@@ -81,14 +81,12 @@ echo "[...] Installation des dependances (peut prendre plusieurs minutes)..."
 "$PYTHON_VENV" -m pip install -r "$APP_DIR/requirements.txt" --quiet
 echo "[OK] Dependances installees."
 
-# --- 5. Creer le lanceur ---
+# --- 5. Lanceur ---
+# lancer.sh est versionne et utilise des chemins relatifs : on ne le regenere pas
+# (sinon il contiendrait des chemins absolus propres a cette machine).
 LAUNCHER="$APP_DIR/lancer.sh"
-cat > "$LAUNCHER" <<EOF
-#!/usr/bin/env bash
-"$PYTHON_VENV" "$APP_DIR/app/main.py"
-EOF
 chmod +x "$LAUNCHER"
-echo "[OK] Lanceur cree : $LAUNCHER"
+echo "[OK] Lanceur : $LAUNCHER"
 
 # --- 6. Entree menu applications (optionnel) ---
 DESKTOP_DIR="$HOME/.local/share/applications"

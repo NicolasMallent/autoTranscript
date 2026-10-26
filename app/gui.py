@@ -1,18 +1,24 @@
+import copy
 import json
+import logging
 import os
 import queue
 import threading
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox
+from typing import NamedTuple
 
 import customtkinter as ctk
 
 import i18n as i18n_mod
+import log_setup
+from paths import APP_DATA_DIR, BASE_DIR
 from transcriber import Transcriber, WHISPERX_AVAILABLE, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".autotranscript", "config.json")
+_logger = logging.getLogger("autotranscript.gui")
+
+_CONFIG_PATH = os.path.join(APP_DATA_DIR, "config.json")
 _REPO_URL = "https://github.com/NicolasMallent/autoTranscript"
 
 _AUTHORS = [
@@ -29,31 +35,232 @@ WHISPER_LANGUAGES = {
     "whisper_lang_auto": "auto",
 }
 
+_FORMATS = ("txt", "srt", "json")
+_MODES = ("file", "folder")
+
+# Valeurs par défaut de la configuration (les clés « last_* » mémorisent le dernier réglage utilisé)
+_DEFAULT_CONFIG = {
+    "lang": "fr",
+    "last_model": "base",
+    "last_folder": "",
+    "last_language": "fr",
+    "last_formats": ["txt", "srt"],
+    "last_mode": "file",
+}
+
+# Message de fin de thread : réactive les boutons (envoyé même après une erreur ou une annulation)
+_DONE = "_done_"
+
+# Messages du thread de transcription : « <événement>:<argument> » ou « <événement> » seul.
+# Chaque code émis par transcriber.py / model_setup.py doit figurer ici (test de contrat).
+_EVENTS_WITH_ARGUMENT = {            # événement: (clé i18n, nom du paramètre du texte)
+    "loading_model": ("log_loading_model", "model"),
+    "processing_file": ("log_processing_file", "file"),
+    "extracting_audio": ("log_extracting_audio", "file"),
+    "aligning": ("log_aligning", "file"),
+    "diarizing": ("log_diarizing", "file"),
+    "done_file": ("log_done_file", "file"),
+    "align_unavailable": ("log_align_unavailable", "lang"),
+    "error": ("log_error", "error"),
+}
+_EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
+    "all_done": "log_all_done",
+    "cancelled": "log_cancelled",
+    "no_audio_found": "log_no_audio_found",
+    "diarization_model_connecting": "log_diarization_model_connecting",
+    "diarization_model_extracting": "log_diarization_model_extracting",
+    "diarization_model_ready": "log_diarization_model_ready",
+    "diarization_model_cached": "log_diarization_model_ready",
+}
+_EVENTS_WITH_COUNTS = {              # événement: (clé i18n, (paramètres), remplace la dernière ligne ?)
+    "done_with_errors": ("log_done_with_errors", ("failed", "total"), False),
+    "diarization_model_dl": ("log_diarization_model_dl", ("done", "total"), True),
+}
+
+
+class _LogLine(NamedTuple):
+    """Ligne de journal à afficher : clé i18n, paramètres, et s'il faut remplacer la dernière ligne."""
+
+    key: str
+    params: dict
+    replace_last: bool = False
+
+
+def _translate_message(msg: str) -> "_LogLine | None":
+    """
+    Traduit un message du thread de transcription en ligne de journal.
+
+    Args:
+        msg: Code reçu par la queue : ``all_done``, ``processing_file:a.mp3``,
+            ``done_with_errors:1/3``, etc. L'argument est tout ce qui suit le premier « : ».
+
+    Returns:
+        La ligne à afficher, ou None si le code est inconnu ou mal formé (ignoré par la fenêtre).
+    """
+    event, separator, argument = msg.partition(":")
+    if not separator:
+        key = _EVENTS_WITHOUT_ARGUMENT.get(msg)
+        return _LogLine(key, {}) if key else None
+    if event in _EVENTS_WITH_ARGUMENT:
+        key, parameter = _EVENTS_WITH_ARGUMENT[event]
+        return _LogLine(key, {parameter: argument})
+    if event in _EVENTS_WITH_COUNTS:
+        key, (first, second), replace_last = _EVENTS_WITH_COUNTS[event]
+        left, slash, right = argument.partition("/")
+        if not slash:
+            return None
+        return _LogLine(key, {first: left, second: right}, replace_last)
+    return None
+
+
+def _file_dialog_filetypes() -> list[tuple[str, str]]:
+    """Filtres du sélecteur de fichier : médias pris en charge, puis tous les fichiers."""
+    patterns = " ".join(f"*{extension}" for extension in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
+    return [(i18n_mod.t("file_types_media"), patterns), (i18n_mod.t("file_types_all"), "*.*")]
+
 
 def _load_models() -> list[dict]:
-    path = os.path.join(_BASE_DIR, "models.json")
+    """Lit la liste des modèles Whisper proposés (models.json : id, taille, description fr/en)."""
+    path = os.path.join(BASE_DIR, "models.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
+def _set_aside_corrupt_config() -> None:
+    """Renomme la configuration illisible en ``config.json.corrupt`` (pour diagnostic)."""
+    try:
+        os.replace(_CONFIG_PATH, _CONFIG_PATH + ".corrupt")
+    except OSError:
+        _logger.warning("Impossible de mettre de côté la configuration illisible", exc_info=True)
+
+
 def _load_config() -> dict:
-    if os.path.exists(_CONFIG_PATH):
+    """
+    Lit la configuration utilisateur (langue, dernier modèle, mode debug, derniers réglages).
+
+    Returns:
+        La configuration, complétée par les valeurs par défaut des clés absentes. Un fichier
+        absent, illisible, corrompu ou qui n'est pas un objet JSON donne les valeurs par défaut ;
+        un fichier corrompu est conservé en ``config.json.corrupt``.
+    """
+    try:
         with open(_CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    return {"lang": "fr", "last_model": "base", "last_folder": ""}
+            loaded = json.load(f)
+    except FileNotFoundError:
+        return copy.deepcopy(_DEFAULT_CONFIG)
+    except (OSError, ValueError):   # ValueError : JSON invalide ou octets qui ne sont pas de l'UTF-8
+        _logger.warning("Configuration illisible : valeurs par défaut utilisées", exc_info=True)
+        _set_aside_corrupt_config()
+        return copy.deepcopy(_DEFAULT_CONFIG)
+    if not isinstance(loaded, dict):
+        _logger.warning("Configuration invalide (objet JSON attendu) : valeurs par défaut utilisées")
+        _set_aside_corrupt_config()
+        return copy.deepcopy(_DEFAULT_CONFIG)
+    return {**copy.deepcopy(_DEFAULT_CONFIG), **loaded}
 
 
 def _save_config(cfg: dict) -> None:
-    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    """
+    Écrit la configuration utilisateur dans ~/.autotranscript/config.json.
+
+    L'écriture est atomique (fichier temporaire puis remplacement) : une interruption ne peut pas
+    laisser une configuration tronquée. Une erreur d'écriture (disque plein, dossier personnel en
+    lecture seule) est journalisée sans interrompre l'application.
+    """
+    tmp_path = _CONFIG_PATH + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, _CONFIG_PATH)
+    except OSError:
+        _logger.warning("Impossible d'enregistrer la configuration", exc_info=True)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def speakers_range_is_valid(min_speakers: int | None, max_speakers: int | None) -> bool:
+    """Indique si la plage de locuteurs est cohérente (une borne absente ne contraint rien)."""
+    return min_speakers is None or max_speakers is None or min_speakers <= max_speakers
+
+
+def _language_code_for_label(label: str) -> str:
+    """
+    Convertit le libellé d'une langue de transcription en son code.
+
+    Returns:
+        « fr », « en » ou « auto » (aussi pour un libellé inconnu). Le code, contrairement au
+        libellé, ne dépend pas de la langue de l'interface.
+    """
+    for key, code in WHISPER_LANGUAGES.items():
+        if i18n_mod.t(key) == label:
+            return code
+    return "auto"
+
+
+def _form_state(cfg: dict, whisperx_available: bool) -> dict:
+    """
+    Calcule les valeurs initiales de l'onglet Transcription à partir de la configuration.
+
+    Args:
+        cfg: Configuration utilisateur (clés ``last_mode``, ``last_language``, ``last_formats``,
+            ``last_diarize``).
+        whisperx_available: Sans whisperx, la diarisation est toujours décochée.
+
+    Returns:
+        Un dictionnaire ``mode``, ``language``, ``formats``, ``diarize``. Toute valeur absente ou
+        invalide est remplacée par sa valeur par défaut.
+    """
+    mode = cfg.get("last_mode")
+    language = cfg.get("last_language")
+    formats = cfg.get("last_formats")
+    diarize = cfg.get("last_diarize")
+
+    if mode not in _MODES:
+        mode = "file"
+    if language not in WHISPER_LANGUAGES.values():
+        language = "fr"
+    formats = list(dict.fromkeys(f for f in formats if f in _FORMATS)) if isinstance(formats, list) else []
+    if not formats:
+        formats = list(_DEFAULT_CONFIG["last_formats"])
+    if not isinstance(diarize, bool):
+        diarize = True
+    return {"mode": mode, "language": language, "formats": formats,
+            "diarize": diarize and whisperx_available}
+
+
+class _SafeScrollableFrame(ctk.CTkScrollableFrame):
+    """
+    CTkScrollableFrame qui ignore les évènements de molette venant d'un widget non enregistré.
+
+    customtkinter 6.0.0 lève ``AttributeError: 'str' object has no attribute 'master'`` quand
+    la molette est utilisée sur un widget Tk que Python ne connaît que par son nom (par
+    exemple la liste déroulante d'une CTkComboBox) : son binding global sur la molette reçoit
+    alors ``event.widget`` sous forme de chaîne.
+    """
+
+    def _check_if_valid_scroll(self, widget):
+        if isinstance(widget, str):
+            return False
+        return super()._check_if_valid_scroll(widget)
 
 
 class App(ctk.CTk):
+    """
+    Fenêtre principale : onglets Transcription, Paramètres et À propos.
+
+    La transcription tourne dans un thread à part. Ce thread ne touche jamais aux widgets : il
+    dépose ses messages dans une queue, que ``_poll_queue`` vide toutes les 100 ms depuis le
+    thread de l'interface.
+    """
     def __init__(self):
         super().__init__()
 
         self._config = _load_config()
+        log_setup.set_debug(self._config.get("debug", False))
+        log_setup.log_environment(_VERSION)
         i18n_mod.load(self._config.get("lang", "fr"))
         self._models = _load_models()
         self._transcriber = Transcriber()
@@ -71,6 +278,10 @@ class App(ctk.CTk):
         self._build_ui()
         self._poll_queue()
 
+    def report_callback_exception(self, exc, val, tb) -> None:
+        """Journalise les exceptions levées dans les callbacks Tk (sinon perdues sur stderr)."""
+        _logger.error("Exception dans un callback Tk", exc_info=(exc, val, tb))
+
     def _build_ui(self):
         self._tabview = ctk.CTkTabview(self)
         self._tabview.pack(fill="both", expand=True, padx=12, pady=12)
@@ -87,8 +298,10 @@ class App(ctk.CTk):
         parent.columnconfigure(1, weight=1)
         row = 0
 
+        form = _form_state(self._config, WHISPERX_AVAILABLE)
+
         # --- Mode file/folder ---
-        self._mode_var = tk.StringVar(value="file")
+        self._mode_var = tk.StringVar(value=form["mode"])
         ctk.CTkLabel(parent, text="").grid(row=row, column=0, pady=(8, 0))
         row += 1
 
@@ -113,7 +326,8 @@ class App(ctk.CTk):
         self._path_entry = ctk.CTkEntry(path_frame, textvariable=self._selected_path, state="readonly")
         self._path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self._select_btn = ctk.CTkButton(
-            path_frame, text=i18n_mod.t("select_file"), width=140, command=self._on_select,
+            path_frame, text=i18n_mod.t("select_file" if form["mode"] == "file" else "select_folder"),
+            width=140, command=self._on_select,
         )
         self._select_btn.grid(row=0, column=1)
         row += 1
@@ -140,7 +354,9 @@ class App(ctk.CTk):
         )
         lang_keys = list(WHISPER_LANGUAGES.keys())
         lang_labels = [i18n_mod.t(k) for k in lang_keys]
-        self._whisper_lang_var = tk.StringVar(value=lang_labels[0])
+        self._whisper_lang_var = tk.StringVar(
+            value=lang_labels[list(WHISPER_LANGUAGES.values()).index(form["language"])]
+        )
         ctk.CTkComboBox(
             parent, values=lang_labels, variable=self._whisper_lang_var, state="readonly", width=220,
         ).grid(row=row, column=1, sticky="w", padx=12, pady=(10, 0))
@@ -152,9 +368,9 @@ class App(ctk.CTk):
         )
         fmt_frame = ctk.CTkFrame(parent, fg_color="transparent")
         fmt_frame.grid(row=row, column=1, columnspan=2, sticky="w", padx=12, pady=(10, 0))
-        self._fmt_txt = tk.BooleanVar(value=True)
-        self._fmt_srt = tk.BooleanVar(value=True)
-        self._fmt_json = tk.BooleanVar(value=False)
+        self._fmt_txt = tk.BooleanVar(value="txt" in form["formats"])
+        self._fmt_srt = tk.BooleanVar(value="srt" in form["formats"])
+        self._fmt_json = tk.BooleanVar(value="json" in form["formats"])
         ctk.CTkCheckBox(fmt_frame, text=i18n_mod.t("format_txt"), variable=self._fmt_txt).pack(
             side="left", padx=(0, 12)
         )
@@ -174,7 +390,7 @@ class App(ctk.CTk):
 
         diarize_frame = ctk.CTkFrame(parent, fg_color="transparent")
         diarize_frame.grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 0))
-        self._diarize_var = tk.BooleanVar(value=WHISPERX_AVAILABLE)
+        self._diarize_var = tk.BooleanVar(value=form["diarize"])
         ctk.CTkCheckBox(
             diarize_frame, text=i18n_mod.t("diarization_label"),
             variable=self._diarize_var, command=self._on_diarize_toggle,
@@ -194,14 +410,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_label")).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_min")).pack(side="left")
         self._min_speakers_var = tk.StringVar(value="")
-        ctk.CTkEntry(self._speakers_frame, textvariable=self._min_speakers_var, width=48, state=_sp_state).pack(
-            side="left", padx=(4, 12)
-        )
+        min_entry = ctk.CTkEntry(self._speakers_frame, textvariable=self._min_speakers_var, width=48, state=_sp_state)
+        min_entry.pack(side="left", padx=(4, 12))
         ctk.CTkLabel(self._speakers_frame, text=i18n_mod.t("speakers_max")).pack(side="left")
         self._max_speakers_var = tk.StringVar(value="")
-        ctk.CTkEntry(self._speakers_frame, textvariable=self._max_speakers_var, width=48, state=_sp_state).pack(
-            side="left", padx=(4, 0)
-        )
+        max_entry = ctk.CTkEntry(self._speakers_frame, textvariable=self._max_speakers_var, width=48, state=_sp_state)
+        max_entry.pack(side="left", padx=(4, 0))
+        self._speaker_entries = [min_entry, max_entry]
         row += 1
 
         # --- Buttons ---
@@ -230,8 +445,7 @@ class App(ctk.CTk):
         self._log.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=12, pady=(0, 8))
         parent.rowconfigure(row, weight=1)
 
-        if not WHISPERX_AVAILABLE:
-            self._on_diarize_toggle()
+        self._on_diarize_toggle()   # grise les champs de locuteurs si la diarisation est décochée
 
         self._log_append(i18n_mod.t("log_ready"))
 
@@ -251,8 +465,31 @@ class App(ctk.CTk):
             state="readonly", width=160, command=self._on_lang_change,
         ).grid(row=0, column=1, sticky="w", padx=16, pady=(20, 0))
 
+        # --- Journal (fichier de log à joindre à un signalement) ---
+        ctk.CTkLabel(parent, text=i18n_mod.t("settings_logs_label")).grid(
+            row=1, column=0, sticky="nw", padx=16, pady=(20, 0)
+        )
+        logs_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        logs_frame.grid(row=1, column=1, sticky="w", padx=16, pady=(20, 0))
+        ctk.CTkButton(
+            logs_frame, text=i18n_mod.t("settings_logs_open"), width=210, command=self._on_open_logs,
+        ).pack(anchor="w")
+        ctk.CTkButton(
+            logs_frame, text=i18n_mod.t("settings_logs_copy"), width=210, command=self._on_copy_log_path,
+        ).pack(anchor="w", pady=(6, 0))
+        ctk.CTkLabel(
+            logs_frame, text=i18n_mod.t("settings_logs_hint"),
+            font=ctk.CTkFont(size=11), text_color="gray60", wraplength=420, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+        self._debug_var = tk.BooleanVar(value=self._config.get("debug", False))
+        ctk.CTkCheckBox(
+            parent, text=i18n_mod.t("settings_debug_label"),
+            variable=self._debug_var, command=self._on_debug_toggle,
+        ).grid(row=2, column=1, sticky="w", padx=16, pady=(14, 0))
+
     def _build_about_tab(self, parent):
-        frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        frame = _SafeScrollableFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=16, pady=12)
 
         ctk.CTkLabel(frame, text="AutoTranscript", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", pady=(0, 2))
@@ -304,25 +541,39 @@ class App(ctk.CTk):
         self._log.see("end")
         self._log.configure(state="disabled")
 
+    def _on_open_logs(self) -> None:
+        if not log_setup.open_log_folder():
+            messagebox.showwarning(
+                "AutoTranscript", i18n_mod.t("error_open_logs", path=log_setup.LOG_DIR)
+            )
+
+    def _on_copy_log_path(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(str(log_setup.LOG_FILE))
+        self._log_append(i18n_mod.t("log_path_copied", path=log_setup.LOG_FILE))
+
+    def _on_debug_toggle(self) -> None:
+        enabled = self._debug_var.get()
+        self._config["debug"] = enabled
+        _save_config(self._config)
+        log_setup.set_debug(enabled)
+        _logger.info("Mode debug %s", "activé" if enabled else "désactivé")
+
     def _on_mode_change(self) -> None:
         mode = self._mode_var.get()
         self._select_btn.configure(text=i18n_mod.t("select_file" if mode == "file" else "select_folder"))
         self._selected_path.set("")
 
     def _on_diarize_toggle(self) -> None:
+        """Active les champs min/max de locuteurs seulement si la diarisation est cochée."""
         state = "normal" if self._diarize_var.get() else "disabled"
-        for widget in self._speakers_frame.winfo_children():
-            try:
-                widget.configure(state=state)
-            except Exception:
-                pass
+        for entry in self._speaker_entries:
+            entry.configure(state=state)
 
     def _on_select(self) -> None:
         if self._mode_var.get() == "file":
-            exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
             path = filedialog.askopenfilename(
-                title=i18n_mod.t("file_dialog_title"),
-                filetypes=[("Audio / Vidéo", exts), ("Tous les fichiers", "*.*")],
+                title=i18n_mod.t("file_dialog_title"), filetypes=_file_dialog_filetypes(),
             )
         else:
             path = filedialog.askdirectory(title=i18n_mod.t("folder_dialog_title"))
@@ -335,11 +586,15 @@ class App(ctk.CTk):
         return self._model_var.get().split()[0]
 
     def _selected_whisper_lang(self) -> str:
-        label = self._whisper_lang_var.get()
-        for key, value in WHISPER_LANGUAGES.items():
-            if i18n_mod.t(key) == label:
-                return "" if value == "auto" else value
-        return ""
+        """
+        Renvoie le code de la langue de transcription choisie dans la liste.
+
+        Returns:
+            « fr » ou « en », ou une chaîne vide pour la détection automatique (ou si le libellé
+            sélectionné est inconnu).
+        """
+        code = _language_code_for_label(self._whisper_lang_var.get())
+        return "" if code == "auto" else code
 
     def _selected_formats(self) -> list[str]:
         formats = []
@@ -352,6 +607,12 @@ class App(ctk.CTk):
         return formats
 
     def _selected_speakers(self) -> tuple[int | None, int | None]:
+        """
+        Lit les champs min/max de locuteurs.
+
+        Returns:
+            Le couple (min, max). Une valeur vide, non numérique ou inférieure à 1 vaut None.
+        """
         def _parse(v: str) -> int | None:
             try:
                 n = int(v.strip())
@@ -360,7 +621,28 @@ class App(ctk.CTk):
                 return None
         return _parse(self._min_speakers_var.get()), _parse(self._max_speakers_var.get())
 
+    def _snapshot_form(self) -> None:
+        """
+        Mémorise dans la configuration les réglages de l'onglet Transcription (sans l'enregistrer).
+
+        Le code de la langue est mémorisé et non son libellé, qui change avec la langue de
+        l'interface.
+        """
+        self._config.update(
+            last_model=self._selected_model_id(),
+            last_language=_language_code_for_label(self._whisper_lang_var.get()),
+            last_formats=self._selected_formats(),
+            last_diarize=self._diarize_var.get(),
+            last_mode=self._mode_var.get(),
+        )
+
     def _on_transcribe(self) -> None:
+        """
+        Valide la saisie puis lance la transcription dans un thread.
+
+        Les erreurs sont journalisées et transmises à l'interface par la queue ; le message
+        ``_done_`` est toujours envoyé à la fin pour réactiver les boutons.
+        """
         path = self._selected_path.get()
         if not path:
             messagebox.showwarning("AutoTranscript", i18n_mod.t("error_no_input"))
@@ -370,8 +652,14 @@ class App(ctk.CTk):
             messagebox.showwarning("AutoTranscript", i18n_mod.t("error_no_format"))
             return
 
+        diarize = self._diarize_var.get()
+        min_sp, max_sp = self._selected_speakers()
+        if diarize and not speakers_range_is_valid(min_sp, max_sp):
+            messagebox.showwarning("AutoTranscript", i18n_mod.t("error_speakers_range"))
+            return
+
         model_id = self._selected_model_id()
-        self._config["last_model"] = model_id
+        self._snapshot_form()
         _save_config(self._config)
 
         self._running = True
@@ -379,29 +667,46 @@ class App(ctk.CTk):
         self._cancel_btn.configure(state="normal")
         self._progress.set(0)
 
-        diarize = self._diarize_var.get()
-        min_sp, max_sp = self._selected_speakers()
+        language = self._selected_whisper_lang()
+
+        # Les noms de fichiers ne sont pas journalisés (le log est destiné à être partagé)
+        _logger.info(
+            "Transcription demandée : mode=%s modèle=%s langue=%s formats=%s "
+            "diarisation=%s locuteurs=%s-%s",
+            self._mode_var.get(), model_id, language or "auto", formats, diarize, min_sp, max_sp,
+        )
 
         def _run():
             try:
                 self._transcriber.transcribe(
-                    path, model_id, self._selected_whisper_lang(),
+                    path, model_id, language,
                     formats, diarize, min_sp, max_sp,
                     lambda msg, pct: self._queue.put((msg, pct)),
                 )
             except Exception as exc:
+                _logger.exception("La transcription a échoué")
                 self._queue.put((f"error:{exc}", 0.0))
             finally:
-                self._queue.put(("_done_", 1.0))
+                self._queue.put((_DONE, 1.0))
 
         threading.Thread(target=_run, daemon=True).start()
 
     def _on_cancel(self) -> None:
+        """Demande l'arrêt après le fichier en cours et le dit dans le journal (un seul clic utile)."""
         self._transcriber.cancel()
+        self._cancel_btn.configure(state="disabled")
+        self._log_append(i18n_mod.t("log_cancel_requested"))
 
     def _on_lang_change(self, _=None) -> None:
+        """
+        Change la langue de l'interface, l'enregistre puis reconstruit les onglets.
+
+        Les réglages de l'onglet Transcription (modèle, langue, formats, diarisation, mode) sont
+        mémorisés avant la reconstruction et restaurés ensuite ; le chemin sélectionné est conservé.
+        """
         label = self._ui_lang_var.get()
         lang = "fr" if label == i18n_mod.t("settings_language_fr") else "en"
+        self._snapshot_form()
         self._config["lang"] = lang
         _save_config(self._config)
         i18n_mod.load(lang)
@@ -411,47 +716,55 @@ class App(ctk.CTk):
         self._tabview.destroy()
         self._build_ui()
 
+    def _log_replace_last(self, text: str) -> None:
+        """Remplace la dernière ligne du journal (progression d'un téléchargement) au lieu d'en ajouter une."""
+        self._log.configure(state="normal")
+        self._log.delete("end-2l", "end-1c")
+        self._log.insert("end", text + "\n")
+        self._log.see("end")
+        self._log.configure(state="disabled")
+
+    def _show_log_line(self, line: _LogLine) -> None:
+        """Affiche une ligne de journal traduite dans la langue de l'interface."""
+        text = i18n_mod.t(line.key, **line.params)
+        if line.replace_last:
+            self._log_replace_last(text)
+        else:
+            self._log_append(text)
+
+    def _handle_message(self, msg: str, pct: float) -> None:
+        """
+        Applique un message du thread de transcription à l'interface.
+
+        ``_done_`` réactive les boutons sans toucher à la barre : après une erreur ou une annulation,
+        elle ne doit pas se remplir à 100 %. Un code inconnu n'écrit rien, mais la barre le suit.
+        """
+        if msg == _DONE:
+            self._running = False
+            self._transcribe_btn.configure(state="normal")
+            self._cancel_btn.configure(state="disabled")
+            return
+        self._progress.set(pct)
+        line = _translate_message(msg)
+        if line is not None:
+            self._show_log_line(line)
+
     def _poll_queue(self) -> None:
+        """
+        Vide la queue de messages du thread de transcription et met à jour l'interface.
+
+        Chaque message est un couple (code, progression), traduit par ``_translate_message``. Une
+        erreur sur un message est journalisée sans interrompre la boucle : sinon les boutons ne
+        seraient jamais réactivés. Se reprogramme toutes les 100 ms.
+        """
         try:
             while True:
                 msg, pct = self._queue.get_nowait()
-                if msg == "_done_":
-                    self._running = False
-                    self._transcribe_btn.configure(state="normal")
-                    self._cancel_btn.configure(state="disabled")
-                elif msg.startswith("loading_model:"):
-                    self._log_append(i18n_mod.t("log_loading_model", model=msg.split(":", 1)[1]))
-                elif msg.startswith("processing_file:"):
-                    self._log_append(i18n_mod.t("log_processing_file", file=msg.split(":", 1)[1]))
-                elif msg.startswith("extracting_audio:"):
-                    self._log_append(i18n_mod.t("log_extracting_audio", file=msg.split(":", 1)[1]))
-                elif msg.startswith("aligning:"):
-                    self._log_append(i18n_mod.t("log_aligning", file=msg.split(":", 1)[1]))
-                elif msg.startswith("diarizing:"):
-                    self._log_append(i18n_mod.t("log_diarizing", file=msg.split(":", 1)[1]))
-                elif msg == "diarization_model_connecting":
-                    self._log_append(i18n_mod.t("log_diarization_model_connecting"))
-                elif msg.startswith("diarization_model_dl:"):
-                    parts = msg.split(":", 1)[1].split("/")
-                    self._log.configure(state="normal")
-                    # Mise à jour de la dernière ligne plutôt qu'ajout
-                    self._log.delete("end-2l", "end-1c")
-                    self._log.insert("end", i18n_mod.t("log_diarization_model_dl", done=parts[0], total=parts[1]) + "\n")
-                    self._log.see("end")
-                    self._log.configure(state="disabled")
-                elif msg == "diarization_model_extracting":
-                    self._log_append(i18n_mod.t("log_diarization_model_extracting"))
-                elif msg in ("diarization_model_ready", "diarization_model_cached"):
-                    self._log_append(i18n_mod.t("log_diarization_model_ready"))
-                elif msg.startswith("done_file:"):
-                    self._log_append(i18n_mod.t("log_done_file", file=msg.split(":", 1)[1]))
-                elif msg == "all_done":
-                    self._log_append(i18n_mod.t("log_all_done"))
-                elif msg == "no_audio_found":
-                    self._log_append(i18n_mod.t("log_no_audio_found"))
-                elif msg.startswith("error:"):
-                    self._log_append(i18n_mod.t("log_error", error=msg.split(":", 1)[1]))
-                self._progress.set(pct)
+                try:
+                    self._handle_message(msg, pct)
+                except Exception:
+                    # Seul l'événement est journalisé : l'argument peut contenir un nom de fichier
+                    _logger.exception("Message de la transcription non traité (%s)", msg.partition(":")[0])
         except queue.Empty:
             pass
         self.after(100, self._poll_queue)

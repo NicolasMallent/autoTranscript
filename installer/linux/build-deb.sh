@@ -48,6 +48,8 @@ cat > "$PKG_ROOT/DEBIAN/postinst" <<'POSTINST'
 set -e
 INSTALL_DIR=/opt/autotranscript
 VENV_DIR=$INSTALL_DIR/.venv
+REQUIREMENTS=$INSTALL_DIR/requirements.txt
+LOG_FILE=$INSTALL_DIR/install.log
 
 echo "AutoTranscript : creation de l'environnement Python..."
 python3 -m venv "$VENV_DIR"
@@ -55,18 +57,20 @@ python3 -m venv "$VENV_DIR"
 
 echo "AutoTranscript : installation des dependances IA..."
 echo "(telechargement de ~3 Go, cela peut prendre plusieurs minutes)"
+echo "Journal d'installation : $LOG_FILE"
+: > "$LOG_FILE"
 
-# Tente whisperx (Python <3.14, identification des locuteurs disponible).
-# Si incompatible (Python 3.14+), repli sur openai-whisper (transcription seule).
-if "$VENV_DIR/bin/python" -m pip install whisperx 2>/dev/null; then
-    echo "AutoTranscript : whisperx installe (toutes les fonctionnalites disponibles)."
+# Versions epinglees dans requirements.txt (whisperx, pyannote.audio, customtkinter...) : ce sont
+# celles qui sont testees. Si l'installation echoue (ex. Python 3.14+, whisperx incompatible),
+# repli sur openai-whisper (transcription seule, sans identification des locuteurs).
+if "$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS" >> "$LOG_FILE" 2>&1; then
+    echo "AutoTranscript : dependances installees (toutes les fonctionnalites disponibles)."
 else
-    echo "AutoTranscript : whisperx incompatible avec cette version Python."
+    echo "AutoTranscript : echec de l'installation complete (details dans $LOG_FILE)."
     echo "  Installation de openai-whisper (transcription sans identification des locuteurs)."
-    "$VENV_DIR/bin/python" -m pip install openai-whisper
+    CUSTOMTKINTER="$(grep -i '^customtkinter' "$REQUIREMENTS")"
+    "$VENV_DIR/bin/python" -m pip install openai-whisper "$CUSTOMTKINTER" >> "$LOG_FILE" 2>&1
 fi
-
-"$VENV_DIR/bin/python" -m pip install customtkinter --quiet
 
 echo "AutoTranscript : installation terminee."
 POSTINST
@@ -77,6 +81,7 @@ cat > "$PKG_ROOT/DEBIAN/prerm" <<'PRERM'
 #!/bin/bash
 set -e
 rm -rf /opt/autotranscript/.venv
+rm -f /opt/autotranscript/install.log
 PRERM
 chmod 755 "$PKG_ROOT/DEBIAN/prerm"
 

@@ -96,7 +96,7 @@ jobs:
         run: |
           sudo apt-get install -y ffmpeg python3-tk python3-venv --quiet
           sudo dpkg --unpack ./dist/*.deb
-          pip install customtkinter --quiet
+          pip install "$(grep -i '^customtkinter' requirements.txt)" --quiet
           python3 /opt/autotranscript/app/main.py --check
 
       - name: Upload artifact Linux
@@ -107,9 +107,11 @@ jobs:
 
   # ─────────────────────────────────────────────
   #  Modèle pyannote — téléchargé depuis HuggingFace
-  #  et packagé comme asset de release
+  #  et packagé comme asset de release (zip + .sha256)
   #  Prérequis : secret HF_TOKEN dans le dépôt GitHub
-  #  (Settings > Secrets > Actions > New repository secret)
+  #  (Settings > Secrets and variables > Actions > onglet *Secrets*,
+  #  pas *Variables*), appartenant à un compte ayant accepté les conditions de
+  #  https://huggingface.co/pyannote/speaker-diarization-community-1
   # ─────────────────────────────────────────────
   package-pyannote:
     runs-on: ubuntu-latest
@@ -121,20 +123,28 @@ jobs:
           python-version: "3.11"
 
       - name: Installer huggingface_hub
-        run: pip install huggingface_hub
+        run: pip install "$(grep -i '^huggingface_hub' requirements.txt)"
 
-      - name: Telecharger et packager les modeles pyannote
+      - name: Telecharger et packager le modele pyannote
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p dist
           python scripts/download_pyannote.py
 
+      # Sans HF_TOKEN ni acces a HuggingFace : comme chez l'utilisateur
+      - name: Verifier le chargement hors ligne du modele
+        run: |
+          pip install "$(grep -i '^pyannote.audio' requirements.txt)" --quiet
+          python scripts/check_pyannote_zip.py
+
       - name: Upload artifact pyannote
         uses: actions/upload-artifact@v4
         with:
           name: pyannote-model
-          path: dist/pyannote-community-1.zip
+          path: |
+            dist/pyannote-community-1.zip
+            dist/pyannote-community-1.zip.sha256
 
   # ─────────────────────────────────────────────
   #  Créer la GitHub Release avec les trois fichiers
