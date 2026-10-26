@@ -77,6 +77,10 @@
   "log_sentence_data_unavailable": "Données de découpage en phrases indisponibles (téléchargement impossible) : horodatage par segment. Détails dans le journal.",
   "log_loading_align_model": "Chargement du modèle d'alignement ({lang})...",
   "log_diarization_failed": "Identification des locuteurs impossible : transcription enregistrée sans locuteurs. Détails dans le journal.",
+  "log_transcribing": "Transcription : {percent} %",
+  "log_transcribing_eta": "Transcription : {percent} % (reste ~{eta})",
+  "log_identifying": "Locuteurs : {percent} %",
+  "log_identifying_eta": "Locuteurs : {percent} % (reste ~{eta})",
   "log_align_unavailable": "Horodatage par phrase indisponible (langue « {lang} » ou modèle d'alignement non téléchargeable) : horodatage par segment. Détails dans le journal.",
 
   "error_no_input": "Veuillez sélectionner un fichier ou un dossier.",

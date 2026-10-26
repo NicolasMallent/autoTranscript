@@ -297,6 +297,24 @@ class TestTranscribeKwargs:
     def test_openai_whisper_has_no_batch_size(self, monkeypatch):
         assert self._run(monkeypatch, "en", openai=True) == {"language": "en"}
 
+    def test_progress_callback_is_given_to_whisperx(self, monkeypatch):
+        engine = FakeEngine(monkeypatch)
+        t = T.Transcriber()
+        t._load_model("base", lambda m, p: None)
+        progress = lambda percent: None
+        t._transcribe("audio_fr.wav", "fr", progress)
+        assert engine.transcribe_calls[-1][1]["progress_callback"] is progress
+
+    def test_no_progress_callback_is_sent_without_one(self, monkeypatch):
+        assert "progress_callback" not in self._run(monkeypatch, "fr")
+
+    def test_openai_whisper_does_not_get_a_progress_callback(self, monkeypatch):
+        engine = FakeEngine(monkeypatch, openai=True)
+        t = T.Transcriber()
+        t._load_model("base", lambda m, p: None)
+        t._transcribe("audio_fr.wav", "fr", lambda percent: None)
+        assert "progress_callback" not in engine.transcribe_calls[-1][1]
+
 
 class TestAlignModelCache:
     def test_same_language_is_loaded_once(self, monkeypatch):
@@ -333,7 +351,7 @@ class TestAlignModelCache:
 class TestTryAlign:
     def _call(self, transcriber, result, language=""):
         messages = []
-        aligned = transcriber._try_align(result, "audio_fr.wav", language, "/x/a.wav", 0.0, 1.0,
+        aligned = transcriber._try_align(result, "audio_fr.wav", language, "/x/a.wav", 0.0, 1.0, (0.4, 1.0),
                                          lambda code, pct: messages.append(code))
         return aligned, messages
 
@@ -341,7 +359,8 @@ class TestTryAlign:
         FakeEngine(monkeypatch)
         aligned, messages = self._call(T.Transcriber(), {"segments": [{"text": "x"}], "language": "fr"})
         assert aligned["language"] == "fr" and len(aligned["segments"]) == 3
-        assert messages == ["aligning:a.wav"]
+        assert messages[0] == "aligning:a.wav"
+        assert set(messages[1:]) == {"progress"}       # progression de l'étape : la barre seule
 
     def test_failure_returns_the_original_result_untouched(self, monkeypatch):
         FakeEngine(monkeypatch, align_error=LookupError("punkt_tab"))
@@ -360,6 +379,153 @@ class TestTryAlign:
         FakeEngine(monkeypatch, align_error=RuntimeError("panne"))
         _, messages = self._call(T.Transcriber(), {"segments": []}, language="en")
         assert messages[-1] == "align_unavailable:en"
+
+
+class FakeClock:
+    """Horloge réglable : ``now`` avance à la main, sans attendre."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class TestStageRanges:
+    """Part de chaque étape dans le temps d'un fichier (réglage de la barre de progression)."""
+
+    def test_ranges_are_contiguous_and_cover_the_whole_file(self):
+        ranges = T._stage_ranges("large-v3", aligned=True, diarize=True)
+        assert list(ranges) == ["transcribe", "align", "diarize"]
+        assert ranges["transcribe"][0] == 0.0 and ranges["diarize"][1] == 1.0
+        assert ranges["transcribe"][1] == pytest.approx(ranges["align"][0])
+        assert ranges["align"][1] == pytest.approx(ranges["diarize"][0])
+
+    def test_transcription_alone_takes_the_whole_bar(self):
+        assert T._stage_ranges("base", aligned=False, diarize=False) == {"transcribe": (0.0, 1.0)}
+
+    def test_only_the_enabled_stages_are_present(self):
+        assert list(T._stage_ranges("base", aligned=True, diarize=False)) == ["transcribe", "align"]
+        assert list(T._stage_ranges("base", aligned=False, diarize=True)) == ["transcribe", "diarize"]
+
+    def test_diarization_dominates_with_small_models(self):
+        """Mesuré sur CPU : 70 s de diarisation pour 4 s de transcription (base) sur 60 s d'audio."""
+        start, end = T._stage_ranges("base", aligned=True, diarize=True)["diarize"]
+        assert end - start > 0.8
+
+    def test_a_larger_model_gives_transcription_a_larger_share(self):
+        share = lambda model: (lambda r: r[1] - r[0])(T._stage_ranges(model, True, True)["transcribe"])
+        assert share("tiny") < share("base") < share("small") < share("medium") < share("large-v3")
+
+    @pytest.mark.parametrize("model", ["large", "large-v2", "large-v3"])
+    def test_every_large_model_has_the_same_weights(self, model):
+        assert T._stage_ranges(model, True, True) == T._stage_ranges("large-v3", True, True)
+
+    def test_an_unknown_model_uses_a_default_instead_of_failing(self):
+        ranges = T._stage_ranges("modele-inconnu", aligned=True, diarize=True)
+        assert ranges["diarize"][1] == 1.0 and ranges["transcribe"][1] > 0
+
+    def test_every_model_of_models_json_is_known(self, project_root):
+        import json
+        models = json.loads((project_root / "models.json").read_text(encoding="utf-8"))
+        assert all(m["id"] in T._TRANSCRIBE_COST for m in models)
+
+
+class TestStageProgress:
+    def make(self, code=None, base=0.0, share=1.0, stage=(0.0, 1.0)):
+        messages, clock = [], FakeClock()
+        progress = T._StageProgress(lambda c, p: messages.append((c, p)), base, share, stage, code=code, clock=clock)
+        return progress, messages, clock
+
+    def test_percent_is_mapped_into_the_batch_progress(self):
+        progress, messages, _ = self.make(base=0.5, share=0.25, stage=(0.2, 0.8))
+        for percent in (0, 50, 100):
+            progress(percent)
+        assert [p for _, p in messages] == pytest.approx([0.55, 0.625, 0.7])
+
+    def test_bar_only_stages_send_the_progress_code(self):
+        progress, messages, _ = self.make()
+        progress(10)
+        assert messages == [("progress", pytest.approx(0.1))]
+
+    def test_only_one_message_per_whole_percent(self):
+        progress, messages, _ = self.make(code="transcribing")
+        for percent in (10.1, 10.5, 10.9, 11.0, 11.4):
+            progress(percent)
+        assert [c for c, _ in messages] == ["transcribing:10/", "transcribing:11/"]
+
+    def test_it_never_goes_backwards(self):
+        progress, messages, _ = self.make(code="transcribing")
+        for percent in (50, 30, 50, 49.9):
+            progress(percent)
+        assert [c for c, _ in messages] == ["transcribing:50/"]
+
+    @pytest.mark.parametrize("percent, expected", [(-5, "transcribing:0/"), (250, "transcribing:100/")])
+    def test_out_of_range_values_are_clamped(self, percent, expected):
+        progress, messages, _ = self.make(code="transcribing")
+        progress(percent)
+        assert messages[0][0] == expected and 0.0 <= messages[0][1] <= 1.0
+
+    def test_the_first_call_at_zero_gives_a_visible_start(self):
+        progress, messages, _ = self.make(code="transcribing", base=0.25, share=0.5, stage=(0.1, 0.9))
+        progress(0)
+        assert messages == [("transcribing:0/", pytest.approx(0.25 + 0.5 * 0.1))]
+
+    def test_there_is_no_estimate_before_3_percent(self):
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += 300
+        progress(2)
+        assert messages[0][0] == "transcribing:2/"
+
+    def test_there_is_no_estimate_during_the_first_20_seconds(self):
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += 19
+        progress(50)
+        assert messages[0][0] == "transcribing:50/"
+
+    @pytest.mark.parametrize("percent, elapsed, remaining", [(50, 60, 60), (25, 60, 180), (10, 100, 900), (99, 100, 1)])
+    def test_the_estimate_is_extrapolated_from_the_pace_so_far(self, percent, elapsed, remaining):
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += elapsed
+        progress(percent)
+        assert messages[0][0] == f"transcribing:{percent}/{remaining}"
+
+    def test_the_estimate_is_an_integer_number_of_seconds(self):
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += 61
+        progress(33)
+        eta = messages[0][0].split("/")[1]
+        assert eta.isdigit()
+
+    def test_other_events_use_their_own_code(self):
+        progress, messages, _ = self.make(code="identifying")
+        progress(5)
+        assert messages[0][0] == "identifying:5/"
+
+    def test_an_estimate_can_be_turned_off_for_a_stage(self):
+        """La progression de pyannote n'est pas linéaire dans le temps : mesuré, l'extrapolation annonçait
+        19 s à 58 % alors qu'il en restait 101. L'identification des locuteurs n'affiche donc pas de reste."""
+        messages, clock = [], FakeClock()
+        progress = T._StageProgress(lambda c, p: messages.append(c), 0.0, 1.0, (0.0, 1.0),
+                                    code="identifying", with_eta=False, clock=clock)
+        clock.now += 600
+        progress(50)
+        assert messages == ["identifying:50/"]
+
+    def test_an_estimate_is_still_given_by_default(self):
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += 60
+        progress(50)
+        assert messages[0][0] == "transcribing:50/60"
+
+    @pytest.mark.parametrize("percent", [0, 0.0, -1])
+    def test_a_zero_percent_never_divides_by_zero(self, monkeypatch, percent):
+        monkeypatch.setattr(T, "_ETA_MIN_PERCENT", 0)
+        monkeypatch.setattr(T, "_ETA_MIN_SECONDS", 0)
+        progress, messages, clock = self.make(code="transcribing")
+        clock.now += 100
+        progress(percent)       # ne doit pas lever
+        assert messages[0][0] == "transcribing:0/"
 
 
 class TestReleaseDiarizationModels:

@@ -221,11 +221,13 @@ class FakeEngine:
         align_error: Exception levée par ``whisperx.align`` (ex. ``LookupError`` de punkt_tab).
         diarizer_error: Exception levée au CHARGEMENT de la pipeline de diarisation.
         diarize_error: Exception levée par la diarisation elle-même (après la transcription).
+        fine_progress: whisperx rapporte sa progression par dixièmes de pourcent (1000 appels)
+            au lieu de cinq paliers : sert à vérifier qu'un seul message part par pourcentage entier.
     """
 
     def __init__(self, monkeypatch, *, align_fail=(), openai=False, cuda=False,
                  punkt_ready=True, punkt_download_fails=None, align_error=None,
-                 diarizer_error=None, diarize_error=None):
+                 diarizer_error=None, diarize_error=None, fine_progress=False):
         import transcriber
 
         self.model_loads = []        # (nom, device, compute_type)
@@ -239,6 +241,7 @@ class FakeEngine:
         self.align_error = align_error
         self.diarizer_error = diarizer_error
         self.diarize_error = diarize_error
+        steps = [i / 10 for i in range(1, 1001)] if fine_progress else [20, 40, 60, 80, 100]
         # Ordre des étapes lourdes : ("load_model", nom), ("nltk_download",), ("diarizer_load",),
         # ("align_load", langue), ("transcribe", audio)
         self.order = []
@@ -250,6 +253,9 @@ class FakeEngine:
             def transcribe(self, audio, **kwargs):
                 engine.transcribe_calls.append((audio, kwargs))
                 engine.order.append(("transcribe", audio))
+                for percent in steps:
+                    if kwargs.get("progress_callback"):
+                        kwargs["progress_callback"](percent)
                 return {"segments": [{"start": 18.796, "end": 43.231, "text": CHUNK_TEXT}],
                         "language": _guess_lang(audio, kwargs)}
 
@@ -270,9 +276,12 @@ class FakeEngine:
         wx.load_model = load_model
         wx.load_audio = lambda path: path
         wx.load_align_model = load_align_model
-        def align(segs, model, meta, audio, device):
+        def align(segs, model, meta, audio, device, progress_callback=None):
             if engine.align_error:
                 raise engine.align_error
+            for percent in (50, 100):
+                if progress_callback:
+                    progress_callback(percent)
             return {"segments": [dict(s) for s in SENTENCES], "word_segments": []}
 
         wx.align = align
@@ -286,10 +295,13 @@ class FakeEngine:
                     raise engine.diarizer_error
                 engine.diarizer_loads.append((model_name, device))
 
-            def __call__(self, audio, **kwargs):
+            def __call__(self, audio, progress_callback=None, **kwargs):
                 if engine.diarize_error:
                     raise engine.diarize_error
-                engine.diarize_calls.append(kwargs)
+                engine.diarize_calls.append(kwargs)       # sans le callback : min/max seulement
+                for percent in (50, 100):
+                    if progress_callback:
+                        progress_callback(percent)
                 return "diarization"
 
         def assign_word_speakers(diarization, result):

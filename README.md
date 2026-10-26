@@ -110,6 +110,7 @@ AUTOTRANSCRIPT_MODEL_DIR=pyannote-community-1/speaker-diarization-community-1 .v
 5. **Sélectionnez le(s) format(s) de sortie** souhaités.
 
 6. Cliquez sur **Transcrire**. Les fichiers résultats sont enregistrés **dans le même dossier** que la source.
+   La barre de progression avance sur l'ensemble des fichiers, et une ligne du journal indique l'avancement de l'étape en cours (transcription, puis identification des locuteurs) avec, pour la transcription, une estimation du temps restant affichée une fois le rythme établi (la progression de l'identification des locuteurs n'étant pas régulière, elle n'indique qu'un pourcentage). Le premier lancement d'un modèle peut être long : il est d'abord téléchargé.
 
 ---
 

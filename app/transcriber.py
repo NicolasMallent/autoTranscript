@@ -24,6 +24,23 @@ ALL_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 # Taille de lot de la transcription whisperx
 _BATCH_SIZE = 8
 
+# Coût relatif de chaque étape par seconde d'audio, mesuré le 26/10/2026 sur un CPU de 8 cœurs (extrait
+# de 60 s : transcription base 4,0 s / medium 11,8 s / large-v3 25,8 s, alignement ~3,5 s, diarisation
+# ~70 s). Ce sont des estimations (tiny et small sont interpolés, rien n'est mesuré sur GPU) : elles ne
+# règlent que la vitesse de la barre de progression ; le temps restant affiché est, lui, extrapolé à
+# partir de la progression réelle.
+_TRANSCRIBE_COST = {
+    "tiny": 0.04, "base": 0.07, "small": 0.12, "medium": 0.20,
+    "large": 0.43, "large-v2": 0.43, "large-v3": 0.43,
+}
+_DEFAULT_TRANSCRIBE_COST = 0.20
+_ALIGN_COST = 0.06
+_DIARIZE_COST = 1.17
+
+# Le temps restant n'est annoncé qu'une fois le rythme fiable (avant, l'extrapolation varie trop)
+_ETA_MIN_PERCENT = 3
+_ETA_MIN_SECONDS = 20
+
 # find_spec évite d'importer whisperx (et torch, lent) au démarrage de l'interface.
 # Une installation cassée n'est donc détectée qu'au premier import réel.
 try:
@@ -32,6 +49,88 @@ except (ImportError, ValueError):
     WHISPERX_AVAILABLE = False
 if not WHISPERX_AVAILABLE:
     _logger.warning("whisperx non installé : repli sur openai-whisper, sans diarisation")
+
+
+def _stage_ranges(model_name: str, aligned: bool, diarize: bool) -> dict[str, tuple[float, float]]:
+    """
+    Répartit la barre de progression d'un fichier entre ses étapes, selon leur coût estimé.
+
+    Args:
+        model_name: Modèle Whisper (le coût de la transcription en dépend).
+        aligned: L'alignement des mots aura lieu.
+        diarize: L'identification des locuteurs aura lieu.
+
+    Returns:
+        Pour chaque étape présente (``transcribe``, ``align``, ``diarize``, dans cet ordre), son
+        intervalle (début, fin) dans [0, 1] ; les intervalles sont contigus et finissent à 1.
+    """
+    costs = {"transcribe": _TRANSCRIBE_COST.get(model_name, _DEFAULT_TRANSCRIBE_COST)}
+    if aligned:
+        costs["align"] = _ALIGN_COST
+    if diarize:
+        costs["diarize"] = _DIARIZE_COST
+    total = sum(costs.values())
+    ranges, start = {}, 0.0
+    for stage, cost in costs.items():
+        ranges[stage] = (start, start + cost / total)
+        start = ranges[stage][1]
+    last = list(ranges)[-1]
+    ranges[last] = (ranges[last][0], 1.0)     # évite l'erreur d'arrondi sur la dernière borne
+    return ranges
+
+
+class _StageProgress:
+    """
+    Suit la progression d'une étape (0 à 100 %) et la transmet à l'interface.
+
+    Le pourcentage de l'étape est converti en progression du lot, et un message ne part que lorsque le
+    pourcentage ENTIER change : whisperx peut appeler le callback des centaines de fois, la queue de
+    l'interface ne doit pas être inondée. La progression ne recule jamais.
+
+    Args:
+        cb: Callback de progression de l'interface.
+        base: Progression du lot au début de ce fichier (entre 0 et 1).
+        share: Part de la progression totale que représente ce fichier.
+        stage: Intervalle (début, fin) de l'étape dans le fichier (voir ``_stage_ranges``).
+        code: Événement à écrire dans le journal (``transcribing``, ``identifying``) ; sans lui, seule
+            la barre avance (message ``progress``).
+        with_eta: Annonce un temps restant extrapolé. À désactiver quand la progression n'est pas
+            linéaire dans le temps (pyannote : étape de segmentation rapide, puis embeddings bien plus
+            lents ; mesuré, l'extrapolation annonçait 19 s à 58 % alors qu'il en restait 101).
+        clock: Horloge (injectable pour les tests).
+    """
+
+    def __init__(self, cb: Callable, base: float, share: float, stage: tuple[float, float],
+                 code: Optional[str] = None, with_eta: bool = True,
+                 clock: Callable[[], float] = time.monotonic):
+        self._cb = cb
+        self._base = base
+        self._share = share
+        self._start, self._end = stage
+        self._code = code
+        self._with_eta = with_eta
+        self._clock = clock
+        self._started = clock()
+        self._last = -1
+
+    def _remaining(self, percent: float) -> str:
+        """Secondes restantes extrapolées du rythme actuel, ou chaîne vide si l'estimation est trop incertaine."""
+        elapsed = self._clock() - self._started
+        if not self._with_eta or percent <= 0 or percent < _ETA_MIN_PERCENT or elapsed < _ETA_MIN_SECONDS:
+            return ""
+        return str(int(elapsed * (100 - percent) / percent))
+
+    def __call__(self, percent: float) -> None:
+        percent = max(0.0, min(100.0, percent))
+        whole = int(percent)
+        if whole <= self._last:
+            return
+        self._last = whole
+        overall = self._base + self._share * (self._start + (self._end - self._start) * percent / 100)
+        if self._code:
+            self._cb(f"{self._code}:{whole}/{self._remaining(percent)}", overall)
+        else:
+            self._cb("progress", overall)
 
 
 def _find_ffmpeg() -> str:
@@ -288,7 +387,8 @@ class Transcriber:
             min_speakers: Nombre minimal de locuteurs, ou None.
             max_speakers: Nombre maximal de locuteurs, ou None.
             progress_callback: Appelé avec (code_message, progression entre 0 et 1). Codes émis :
-                loading_model, processing_file, extracting_audio, aligning, diarizing, done_file,
+                loading_model, processing_file, extracting_audio, transcribing, aligning, progress,
+                diarizing, identifying, done_file,
                 error, done_with_errors, all_done, cancelled, no_audio_found, align_unavailable,
                 sentence_data_download, sentence_data_unavailable, loading_align_model,
                 diarization_failed et diarization_model_*.
@@ -570,13 +670,15 @@ class Transcriber:
         self._diarizer = None
         self._free_memory()
 
-    def _transcribe(self, audio, language: str) -> dict:
+    def _transcribe(self, audio, language: str, progress: Optional[Callable[[float], None]] = None) -> dict:
         """
         Lance la transcription Whisper avec le moteur chargé.
 
         Args:
             audio: Tableau audio (whisperx) ou chemin du fichier (openai-whisper).
             language: Code langue, ou chaîne vide pour la détection automatique.
+            progress: Reçoit le pourcentage (0 à 100) après chaque segment. Seul whisperx le fournit :
+                openai-whisper n'a pas de callback de progression et l'ignore.
 
         Returns:
             Le résultat du moteur (clés ``segments`` et ``language``).
@@ -586,11 +688,13 @@ class Transcriber:
             kwargs["language"] = language
         if WHISPERX_AVAILABLE:
             kwargs["batch_size"] = _BATCH_SIZE
+            if progress is not None:
+                kwargs["progress_callback"] = progress
         return self._model.transcribe(audio, **kwargs)
 
     def _align(
         self, result: dict, audio, language: str, file_path: str,
-        base_progress: float, file_progress: float, cb: Callable,
+        base_progress: float, file_progress: float, stage: tuple[float, float], cb: Callable,
     ) -> dict:
         """
         Aligne les mots sur l'audio : chaque segment devient une ou plusieurs phrases horodatées.
@@ -602,6 +706,7 @@ class Transcriber:
             file_path: Fichier source (pour le message de progression).
             base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
             file_progress: Part de la progression totale que représente ce fichier.
+            stage: Intervalle (début, fin) de l'alignement dans la barre du fichier.
             cb: Callback de progression.
 
         Returns:
@@ -616,13 +721,17 @@ class Transcriber:
 
         detected_lang = result.get("language", language or "fr")
         _logger.info("Langue utilisée pour l'alignement : %s", detected_lang)
-        cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * 0.4)
+        cb(f"aligning:{os.path.basename(file_path)}", base_progress + file_progress * stage[0])
+        progress = _StageProgress(cb, base_progress, file_progress, stage)     # la barre seule
         model_a, metadata = self._get_align_model(detected_lang)
-        return whisperx.align(result["segments"], model_a, metadata, audio, self._device)
+        aligned = whisperx.align(result["segments"], model_a, metadata, audio, self._device,
+                                 progress_callback=progress)
+        progress(100.0)
+        return aligned
 
     def _try_align(
         self, result: dict, audio, language: str, file_path: str,
-        base_progress: float, file_progress: float, cb: Callable,
+        base_progress: float, file_progress: float, stage: tuple[float, float], cb: Callable,
     ) -> dict:
         """
         Aligne les mots si c'est possible, sinon garde le résultat tel quel.
@@ -637,6 +746,7 @@ class Transcriber:
             file_path: Fichier source (pour les messages de progression).
             base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
             file_progress: Part de la progression totale que représente ce fichier.
+            stage: Intervalle (début, fin) de l'alignement dans la barre du fichier.
             cb: Callback de progression ; reçoit ``align_unavailable:<langue>`` en cas de repli.
 
         Returns:
@@ -645,12 +755,12 @@ class Transcriber:
         """
         lang = result.get("language", language or "fr")
         try:
-            aligned = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
+            aligned = self._align(result, audio, language, file_path, base_progress, file_progress, stage, cb)
         except Exception:
             _logger.warning(
                 "Alignement impossible (langue %s) : horodatage par segment", lang, exc_info=True,
             )
-            cb(f"align_unavailable:{lang}", base_progress + file_progress * 0.4)
+            cb(f"align_unavailable:{lang}", base_progress + file_progress * stage[0])
             return result
         return {"language": lang, **aligned}
 
@@ -677,15 +787,21 @@ class Transcriber:
         Returns:
             Les segments (une entrée par phrase si l'alignement a eu lieu).
         """
+        aligned = WHISPERX_AVAILABLE and self._alignment_enabled
+        ranges = _stage_ranges(self._model_name, aligned=aligned, diarize=False)
         if WHISPERX_AVAILABLE:
             import whisperx
             audio = whisperx.load_audio(audio_path)
         else:
             audio = audio_path
-        result = self._transcribe(audio, language)
+        progress = _StageProgress(cb, base_progress, file_progress, ranges["transcribe"], code="transcribing")
+        progress(0.0)        # une activité est visible dès maintenant, avant la VAD et le premier segment
+        result = self._transcribe(audio, language, progress)
+        progress(100.0)      # openai-whisper ne rapporte rien en route : on clôt l'étape ici
 
-        if WHISPERX_AVAILABLE and self._alignment_enabled:
-            result = self._try_align(result, audio, language, file_path, base_progress, file_progress, cb)
+        if aligned:
+            result = self._try_align(
+                result, audio, language, file_path, base_progress, file_progress, ranges["align"], cb)
         segments = result["segments"]
 
         _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
@@ -724,12 +840,21 @@ class Transcriber:
         import whisperx
         from whisperx.diarize import assign_word_speakers
 
+        ranges = _stage_ranges(self._model_name, aligned=self._alignment_enabled, diarize=True)
         audio = whisperx.load_audio(audio_path)
-        result = self._transcribe(audio, language)
+        progress = _StageProgress(cb, base_progress, file_progress, ranges["transcribe"], code="transcribing")
+        progress(0.0)
+        result = self._transcribe(audio, language, progress)
+        progress(100.0)
         if self._alignment_enabled:
-            result = self._try_align(result, audio, language, file_path, base_progress, file_progress, cb)
+            result = self._try_align(
+                result, audio, language, file_path, base_progress, file_progress, ranges["align"], cb)
 
-        cb(f"diarizing:{os.path.basename(file_path)}", base_progress + file_progress * 0.65)
+        diarize_start = base_progress + file_progress * ranges["diarize"][0]
+        cb(f"diarizing:{os.path.basename(file_path)}", diarize_start)
+        identifying = _StageProgress(
+            cb, base_progress, file_progress, ranges["diarize"], code="identifying", with_eta=False)
+        identifying(0.0)
         diarize_kwargs = {}
         if min_speakers:
             diarize_kwargs["min_speakers"] = min_speakers
@@ -737,14 +862,15 @@ class Transcriber:
             diarize_kwargs["max_speakers"] = max_speakers
         _logger.info("Diarisation (min=%s, max=%s)", min_speakers, max_speakers)
         try:
-            diarize_segments = self._get_diarizer()(audio, **diarize_kwargs)
+            diarize_segments = self._get_diarizer()(audio, progress_callback=identifying, **diarize_kwargs)
+            identifying(100.0)
             result = assign_word_speakers(diarize_segments, result)
             segments = _rename_speakers(result["segments"])
         except Exception:
             # La transcription est déjà calculée (parfois des dizaines de minutes) : on l'enregistre
             # sans locuteurs plutôt que de la perdre
             _logger.exception("Identification des locuteurs impossible : transcription enregistrée sans locuteurs")
-            cb("diarization_failed", base_progress + file_progress * 0.65)
+            cb("diarization_failed", diarize_start)
             segments = result["segments"]
             _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
             return segments

@@ -38,6 +38,11 @@ def codes(received):
     return [code for code, _ in received]
 
 
+def journal_codes(received):
+    """Codes qui écrivent une ligne distincte dans le journal (sans les ticks de progression)."""
+    return [c for c in codes(received) if not c.startswith(("transcribing:", "identifying:")) and c != "progress"]
+
+
 def names(directory):
     return sorted(p.name for p in directory.iterdir())
 
@@ -53,8 +58,9 @@ class TestSimpleMode:
         assert srt.count(" --> ") == 3 and "00:00:25,500 --> 00:00:31,000\nDeuxieme phrase ?" in srt
         data = json.loads((tmp_path / "a_fr_base.json").read_text(encoding="utf-8"))
         assert data["language"] == "fr" and len(data["segments"]) == 3
-        assert codes(received) == ["loading_model:base", "processing_file:a_fr.wav", "aligning:a_fr.wav",
-                                   "done_file:a_fr.wav", "all_done"]
+        # Lignes du journal : les messages de progression (transcribing, progress…) ont leurs propres tests
+        assert journal_codes(received) == ["loading_model:base", "processing_file:a_fr.wav", "aligning:a_fr.wav",
+                                           "done_file:a_fr.wav", "all_done"]
         assert engine.align_loads == ["fr"] and engine.diarizer_loads == []
 
     def test_outputs_are_named_after_the_model(self, monkeypatch, tmp_path):
@@ -388,6 +394,126 @@ class TestDiarizationFailureAfterTranscription:
         assert "diarization_failed" not in received and received[-1] == "cancelled"
 
 
+def ticks(received, event):
+    """Pourcentages des messages ``<événement>:<pct>/…`` reçus, dans l'ordre."""
+    return [int(code.split(":")[1].split("/")[0]) for code, _ in received if code.startswith(f"{event}:")]
+
+
+class TestProgress:
+    """Progression visible : barre, lignes « Transcription : N % » et « Locuteurs : N % »."""
+
+    @pytest.fixture
+    def ready_model(self, model_setup_dirs):
+        populate_model_dir(model_setup_dirs)
+
+    def test_transcription_ticks_run_from_zero_to_one_hundred(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        assert ticks(received, "transcribing") == [0, 20, 40, 60, 80, 100]
+
+    def test_the_first_tick_comes_before_the_model_is_called(self, monkeypatch, tmp_path):
+        """Une activité doit être visible dès la fin du chargement, avant la VAD et le premier segment."""
+        engine = FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        T.Transcriber().transcribe(
+            str(source), "base", "fr", ["txt"], False, None, None,
+            lambda code, pct: engine.order.append(("msg", code)))
+        assert engine.order.index(("msg", "transcribing:0/")) < position(engine.order, "transcribe")
+
+    def test_the_bar_follows_the_stage_ranges(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        ranges = T._stage_ranges("base", aligned=True, diarize=False)
+        by_code = dict(received)
+        assert by_code["transcribing:0/"] == pytest.approx(0.0)
+        assert by_code["transcribing:100/"] == pytest.approx(ranges["transcribe"][1])
+        assert by_code["aligning:a_fr.wav"] == pytest.approx(ranges["align"][0])
+
+    def test_the_bar_never_goes_backwards_over_a_batch_with_speakers(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch)
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav", "c_fr.wav")
+        received = run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"], language="fr")
+        # La préparation du modèle de diarisation (téléchargement) utilise la barre à sa propre échelle,
+        # puis le traitement repart de zéro : la monotonie se vérifie à partir de son début
+        start = codes(received).index("loading_model:base")
+        percents = [pct for _, pct in received[start:]]
+        assert percents == sorted(percents) and max(percents) == 1.0
+        done = [pct for code, pct in received if code.startswith("done_file:")]
+        assert done == pytest.approx([1 / 3, 2 / 3, 1.0])
+
+    def test_speaker_identification_reports_its_progress(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, diarize=True, formats=["txt"], language="fr")
+        assert ticks(received, "identifying") == [0, 50, 100]
+        assert codes(received).index("diarizing:a_fr.wav") < codes(received).index("identifying:0/")
+        assert dict(received)["identifying:100/"] == pytest.approx(1.0)
+
+    def test_alignment_moves_the_bar_without_writing_lines(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        names_ = codes(received)
+        after_aligning = names_[names_.index("aligning:a_fr.wav"):]
+        assert after_aligning.count("progress") >= 2
+        assert not any(c.startswith(("aligning_", "aligned")) for c in names_)
+
+    def test_one_message_per_whole_percent_even_with_very_fine_progress(self, monkeypatch, tmp_path):
+        """whisperx rapporte 1000 valeurs (par dixième de %) : au plus 101 messages (0 à 100 %) partent."""
+        FakeEngine(monkeypatch, fine_progress=True)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        assert ticks(received, "transcribing") == list(range(101))
+
+    def test_openai_whisper_has_no_intermediate_progress(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch, openai=True)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        assert ticks(received, "transcribing") == [0, 100]
+
+    def test_without_alignment_transcription_takes_the_whole_bar(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch, punkt_ready=False, punkt_download_fails=OSError("coupure"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        assert dict(received)["transcribing:100/"] == pytest.approx(1.0)
+        assert not any(c.startswith("aligning:") for c in codes(received))
+
+    def test_progress_codes_carry_no_file_name(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        """Les lignes de progression ne contiennent que des nombres : rien de sensible dans le journal."""
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "entretien_secret_fr.wav")
+        received = run(T.Transcriber(), source, diarize=True, formats=["txt"], language="fr")
+        progress_codes = [c for c in codes(received) if c.startswith(("transcribing:", "identifying:")) or c == "progress"]
+        assert progress_codes and not any("secret" in c for c in progress_codes)
+
+    def test_the_estimate_appears_only_once_the_pace_is_reliable(self, monkeypatch, tmp_path):
+        """Dans un test, tout est instantané : aucune estimation ne doit être affichée."""
+        FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, formats=["txt"], language="fr")
+        assert all(c.endswith("/") for c in codes(received) if c.startswith("transcribing:"))
+
+    def test_only_the_transcription_announces_a_remaining_time(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        """Seuils levés pour que tout calcul d'estimation soit possible : l'identification n'en affiche jamais."""
+        FakeEngine(monkeypatch)
+        monkeypatch.setattr(T, "_ETA_MIN_PERCENT", 0)
+        monkeypatch.setattr(T, "_ETA_MIN_SECONDS", 0)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, diarize=True, formats=["txt"], language="fr"))
+        transcribing = [c for c in received if c.startswith("transcribing:")]
+        identifying = [c for c in received if c.startswith("identifying:")]
+        assert any(not c.endswith("/") for c in transcribing)      # la transcription annonce un reste
+        assert identifying and all(c.endswith("/") for c in identifying)
+
+    def test_a_failed_diarization_still_reaches_the_end_of_the_bar(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        FakeEngine(monkeypatch, diarize_error=RuntimeError("panne"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(T.Transcriber(), source, diarize=True, formats=["txt"], language="fr")
+        assert dict(received)["done_file:a_fr.wav"] == pytest.approx(1.0)
+
+
 class TestFolderHandling:
     def test_folder_is_processed_in_alphabetical_order_and_non_media_is_ignored(self, monkeypatch, tmp_path):
         FakeEngine(monkeypatch)
@@ -558,7 +684,7 @@ class TestBatchRobustness:
         monkeypatch.setattr(T, "_find_ffmpeg", lambda: make_fake_ffmpeg(tmp_path))
         t = T.Transcriber()
 
-        def explode(audio, language):
+        def explode(audio, language, progress=None):
             raise RuntimeError("whisper a planté")
         monkeypatch.setattr(t, "_transcribe", explode)
         received = run(t, video, language="fr")
@@ -570,7 +696,7 @@ class TestBatchRobustness:
         write_media(tmp_path, "a_fr.wav", "b_fr.wav")
         t = T.Transcriber()
 
-        def explode(audio, language):
+        def explode(audio, language, progress=None):
             raise RuntimeError("panne")
         monkeypatch.setattr(t, "_transcribe", explode)
         received = codes(run(t, tmp_path))
@@ -582,7 +708,7 @@ class TestBatchRobustness:
         (source,) = write_media(tmp_path, "secret_entretien_fr.wav")
         t = T.Transcriber()
 
-        def explode(audio, language):
+        def explode(audio, language, progress=None):
             raise RuntimeError("panne")
         monkeypatch.setattr(t, "_transcribe", explode)
         with caplog.at_level(logging.INFO, logger="autotranscript.transcriber"):
@@ -642,7 +768,7 @@ class TestCancellation:
         write_media(tmp_path, "a_fr.wav", "b_fr.wav")
         t = T.Transcriber()
 
-        def explode(audio, language):
+        def explode(audio, language, progress=None):
             raise RuntimeError("panne")
         monkeypatch.setattr(t, "_transcribe", explode)
         received = self._run_cancelling_on(t, tmp_path, "error:")
