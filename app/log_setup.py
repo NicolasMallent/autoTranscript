@@ -27,9 +27,10 @@ _BACKUP_COUNT = 3
 # Un token HuggingFace est "hf_" suivi d'une trentaine de caractères alphanumériques ; la longueur
 # minimale évite de masquer des noms de fonctions comme hf_hub_download
 _HF_TOKEN_RE = re.compile(r"\bhf_[A-Za-z0-9]{20,}")
-# Chemin d'un fichier audio/vidéo (les noms peuvent être sensibles : entretiens, etc.)
+# Chemin d'un fichier audio/vidéo (les noms peuvent être sensibles : entretiens, etc.). Un nom est
+# exigé devant l'extension (sans parenthèses ni crochets) : « (.mp4) » ou « .wav » seuls ne sont pas des chemins
 _MEDIA_PATH_RE = re.compile(
-    r"""[^\s'"<>|]*\.(?:mp3|wav|m4a|ogg|flac|aac|wma|mp4|mkv|avi|mov|webm|wmv|flv)\b""",
+    r"""[^\s'"<>|()\[\]]+\.(?:mp3|wav|m4a|ogg|flac|aac|wma|mp4|mkv|avi|mov|webm|wmv|flv)\b""",
     re.IGNORECASE,
 )
 _HOME = str(Path.home())
