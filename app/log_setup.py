@@ -15,14 +15,18 @@ import threading
 from importlib import metadata
 from pathlib import Path
 
-LOG_DIR = Path.home() / ".autotranscript" / "logs"
+from paths import APP_DATA_DIR
+
+LOG_DIR = APP_DATA_DIR / "logs"
 LOG_FILE = LOG_DIR / "autotranscript.log"
 
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _MAX_BYTES = 1_000_000
 _BACKUP_COUNT = 3
 
-_HF_TOKEN_RE = re.compile(r"hf_[A-Za-z0-9]+")
+# Un token HuggingFace est "hf_" suivi d'une trentaine de caractères alphanumériques ; la longueur
+# minimale évite de masquer des noms de fonctions comme hf_hub_download
+_HF_TOKEN_RE = re.compile(r"\bhf_[A-Za-z0-9]{20,}")
 # Chemin d'un fichier audio/vidéo (les noms peuvent être sensibles : entretiens, etc.)
 _MEDIA_PATH_RE = re.compile(
     r"""[^\s'"<>|]*\.(?:mp3|wav|m4a|ogg|flac|aac|wma|mp4|mkv|avi|mov|webm|wmv|flv)\b""",
@@ -129,6 +133,10 @@ def setup_logging(debug: bool = False) -> Path:
         file_error = exc
 
     logging.getLogger("autotranscript").setLevel(logging.DEBUG)
+    # whisperx installe son propre handler console (et coupe la propagation) tant que son logger
+    # n'en a pas : ses messages n'arriveraient jamais dans notre fichier. Un handler nul suffit à
+    # l'en empêcher, ses messages remontent alors vers les handlers du logger racine.
+    logging.getLogger("whisperx").addHandler(logging.NullHandler())
     set_debug(debug)
 
     sys.excepthook = _log_uncaught
