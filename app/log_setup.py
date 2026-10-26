@@ -23,6 +23,11 @@ _MAX_BYTES = 1_000_000
 _BACKUP_COUNT = 3
 
 _HF_TOKEN_RE = re.compile(r"hf_[A-Za-z0-9]+")
+# Chemin d'un fichier audio/vidéo (les noms peuvent être sensibles : entretiens, etc.)
+_MEDIA_PATH_RE = re.compile(
+    r"""[^\s'"<>|]*\.(?:mp3|wav|m4a|ogg|flac|aac|wma|mp4|mkv|avi|mov|webm|wmv|flv)\b""",
+    re.IGNORECASE,
+)
 _HOME = str(Path.home())
 
 # Bibliothèques dont la version est utile pour diagnostiquer un problème
@@ -46,10 +51,13 @@ def redact(text: str) -> str:
         text: Texte à nettoyer.
 
     Returns:
-        Le texte où les tokens HuggingFace deviennent ``hf_***`` et où le dossier
-        personnel est remplacé par ``~``.
+        Le texte où les tokens HuggingFace deviennent ``hf_***``, les chemins de fichiers
+        audio/vidéo ``<media>`` et où le dossier personnel est remplacé par ``~``. Le
+        masquage des chemins est au mieux : un nom contenant des espaces peut en laisser
+        une partie.
     """
     text = _HF_TOKEN_RE.sub("hf_***", text)
+    text = _MEDIA_PATH_RE.sub("<media>", text)
     return text.replace(_HOME, "~")
 
 
