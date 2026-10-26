@@ -73,6 +73,8 @@
   "log_diarization_model_ready": "Modèle de diarisation prêt.",
   "log_aligning": "Alignement des mots : {file}",
   "log_diarizing": "Identification des locuteurs : {file}",
+  "log_sentence_data_download": "Téléchargement des données de découpage en phrases (une seule fois)...",
+  "log_sentence_data_unavailable": "Données de découpage en phrases indisponibles (téléchargement impossible) : horodatage par segment. Détails dans le journal.",
   "log_align_unavailable": "Horodatage par phrase indisponible (langue « {lang} » ou modèle d'alignement non téléchargeable) : horodatage par segment. Détails dans le journal.",
 
   "error_no_input": "Veuillez sélectionner un fichier ou un dossier.",

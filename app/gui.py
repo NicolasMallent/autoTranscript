@@ -27,7 +27,7 @@ _AUTHORS = [
     "Pierre Andrieu (UPCité - LDAR)",
 ]
 _CONTRIBUTOR = "Nicolas Mallent (Ingénieur R&D Robotique)"
-_VERSION = "2.1.0"
+_VERSION = "2.1.1"
 
 WHISPER_LANGUAGES = {
     "whisper_lang_french": "fr",
@@ -71,6 +71,8 @@ _EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
     "diarization_model_extracting": "log_diarization_model_extracting",
     "diarization_model_ready": "log_diarization_model_ready",
     "diarization_model_cached": "log_diarization_model_ready",
+    "sentence_data_download": "log_sentence_data_download",
+    "sentence_data_unavailable": "log_sentence_data_unavailable",
 }
 _EVENTS_WITH_COUNTS = {              # événement: (clé i18n, (paramètres), remplace la dernière ligne ?)
     "done_with_errors": ("log_done_with_errors", ("failed", "total"), False),

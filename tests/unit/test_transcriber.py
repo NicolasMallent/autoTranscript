@@ -330,6 +330,38 @@ class TestAlignModelCache:
         assert engine.align_loads == ["fr", "fr"]
 
 
+class TestTryAlign:
+    def _call(self, transcriber, result, language=""):
+        messages = []
+        aligned = transcriber._try_align(result, "audio_fr.wav", language, "/x/a.wav", 0.0, 1.0,
+                                         lambda code, pct: messages.append(code))
+        return aligned, messages
+
+    def test_success_returns_the_aligned_sentences_with_the_language(self, monkeypatch):
+        FakeEngine(monkeypatch)
+        aligned, messages = self._call(T.Transcriber(), {"segments": [{"text": "x"}], "language": "fr"})
+        assert aligned["language"] == "fr" and len(aligned["segments"]) == 3
+        assert messages == ["aligning:a.wav"]
+
+    def test_failure_returns_the_original_result_untouched(self, monkeypatch):
+        FakeEngine(monkeypatch, align_error=LookupError("punkt_tab"))
+        result = {"segments": [{"text": "x"}], "language": "fr"}
+        aligned, messages = self._call(T.Transcriber(), result)
+        assert aligned is result
+        assert messages == ["aligning:a.wav", "align_unavailable:fr"]
+
+    def test_model_failure_is_also_a_fallback(self, monkeypatch):
+        FakeEngine(monkeypatch, align_fail=["xx"])
+        result = {"segments": [], "language": "xx"}
+        aligned, messages = self._call(T.Transcriber(), result)
+        assert aligned is result and messages[-1] == "align_unavailable:xx"
+
+    def test_requested_language_is_used_when_the_result_has_none(self, monkeypatch):
+        FakeEngine(monkeypatch, align_error=RuntimeError("panne"))
+        _, messages = self._call(T.Transcriber(), {"segments": []}, language="en")
+        assert messages[-1] == "align_unavailable:en"
+
+
 class TestReleaseDiarizationModels:
     def test_releases_everything_and_frees_gpu_memory(self, monkeypatch, model_setup_dirs):
         engine = FakeEngine(monkeypatch, cuda=True)

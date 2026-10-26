@@ -127,6 +127,111 @@ class TestSimpleMode:
         assert "a_fr_base.txt" in names(tmp_path) and "a_fr_base_diarized.txt" not in names(tmp_path)
 
 
+class TestSentenceData:
+    """Données NLTK (punkt_tab) : vérifiées avant les longues étapes, avec repli si elles manquent."""
+
+    def test_missing_data_are_downloaded_before_the_whisper_model_is_loaded(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, punkt_ready=False)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, formats=["txt"]))
+        assert received.index("sentence_data_download") < received.index("loading_model:base")
+        assert engine.order.index(("nltk_download",)) < engine.order.index(("load_model", "base"))
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == THREE_SENTENCES
+
+    def test_ready_data_mean_no_download_and_no_message(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, formats=["txt"]))
+        assert engine.nltk.download_calls == []
+        assert "sentence_data_download" not in received and "sentence_data_unavailable" not in received
+
+    def test_unavailable_data_disable_the_alignment_once_for_the_whole_batch(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, punkt_ready=False, punkt_download_fails=OSError("pas de réseau"))
+        write_media(tmp_path, "a_fr.wav", "b_fr.wav")
+        received = codes(run(T.Transcriber(), tmp_path, formats=["txt"]))
+        assert received.count("sentence_data_unavailable") == 1
+        assert not any(c.startswith("aligning:") for c in received) and engine.align_loads == []
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        assert (tmp_path / "b_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        assert received[-1] == "all_done"        # un repli n'est pas une erreur
+
+    def test_unavailable_data_in_speaker_mode_still_give_speakers(self, monkeypatch, tmp_path, ui_lang,
+                                                                  model_setup_dirs):
+        FakeEngine(monkeypatch, punkt_ready=False, punkt_download_fails=OSError("pas de réseau"))
+        populate_model_dir(model_setup_dirs)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, diarize=True, formats=["txt"]))
+        assert (tmp_path / "a_fr_base_diarized.txt").read_text(encoding="utf-8") == (
+            "Locuteur 1 [00:00:18 - 00:00:43] :  Premiere phrase. Deuxieme phrase ? Troisieme.\n\n")
+        assert received.count("sentence_data_unavailable") == 1 and received[-1] == "all_done"
+
+    def test_the_check_is_remade_at_every_run(self, monkeypatch, tmp_path):
+        """Une panne réseau passagère ne doit pas désactiver l'alignement pour toute la session."""
+        engine = FakeEngine(monkeypatch, punkt_ready=False, punkt_download_fails=OSError("coupure"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        t = T.Transcriber()
+        run(t, source, formats=["txt"])
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        engine.nltk.download_fails = None
+        run(t, source, formats=["txt"])
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == THREE_SENTENCES
+
+    def test_cancel_during_the_download_stops_before_loading_whisper(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, punkt_ready=False)
+        t = T.Transcriber()
+        engine.nltk.on_download = t.cancel
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = run(t, source)
+        assert received[-1] == ("cancelled", 0.0) and engine.model_loads == []
+
+    def test_openai_whisper_never_touches_nltk(self, monkeypatch, tmp_path):
+        engine = FakeEngine(monkeypatch, openai=True, punkt_ready=False)
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        run(T.Transcriber(), source, formats=["txt"])
+        assert engine.nltk.find_calls == [] and engine.nltk.download_calls == []
+
+
+class TestAlignmentFailureFallback:
+    """Un échec d'alignement ne doit jamais faire perdre une transcription déjà calculée."""
+
+    @pytest.fixture
+    def ready_model(self, model_setup_dirs):
+        populate_model_dir(model_setup_dirs)
+
+    def test_speaker_mode_falls_back_to_segment_level(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        """Régression de l'incident : LookupError de punkt_tab à l'alignement, après 45 minutes de calcul."""
+        FakeEngine(monkeypatch, align_error=LookupError("Resource 'punkt_tab' not found"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, diarize=True, formats=["txt", "srt", "json"]))
+        assert (tmp_path / "a_fr_base_diarized.txt").read_text(encoding="utf-8") == (
+            "Locuteur 1 [00:00:18 - 00:00:43] :  Premiere phrase. Deuxieme phrase ? Troisieme.\n\n")
+        assert {"a_fr_base_diarized.srt", "a_fr_base_diarized.json"} <= set(names(tmp_path))
+        assert "align_unavailable:fr" in received
+        assert received[-1] == "all_done" and not any(c.startswith("error:") for c in received)
+
+    def test_speaker_mode_failure_is_logged_with_its_cause(self, monkeypatch, tmp_path, ready_model, ui_lang, caplog):
+        FakeEngine(monkeypatch, align_error=LookupError("Resource 'punkt_tab' not found"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        with caplog.at_level(logging.WARNING, logger="autotranscript.transcriber"):
+            run(T.Transcriber(), source, diarize=True, formats=["txt"])
+        assert "Alignement impossible" in caplog.text and "punkt_tab" in caplog.text
+
+    def test_simple_mode_falls_back_on_any_alignment_error(self, monkeypatch, tmp_path):
+        FakeEngine(monkeypatch, align_error=LookupError("Resource 'punkt_tab' not found"))
+        (source,) = write_media(tmp_path, "a_fr.wav")
+        received = codes(run(T.Transcriber(), source, formats=["txt"]))
+        assert (tmp_path / "a_fr_base.txt").read_text(encoding="utf-8") == CHUNK_LINE
+        assert "align_unavailable:fr" in received and received[-1] == "all_done"
+
+    def test_one_file_failing_to_align_does_not_affect_the_next(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        engine = FakeEngine(monkeypatch, align_fail=["xx"])
+        write_media(tmp_path, "a_xx.wav", "b_fr.wav")
+        received = codes(run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"]))
+        assert "a_xx_base_diarized.txt" in names(tmp_path) and "b_fr_base_diarized.txt" in names(tmp_path)
+        assert received.count("align_unavailable:xx") == 1 and engine.align_loads == ["fr"]
+        assert received[-1] == "all_done"
+
+
 class TestFolderHandling:
     def test_folder_is_processed_in_alphabetical_order_and_non_media_is_ignored(self, monkeypatch, tmp_path):
         FakeEngine(monkeypatch)
@@ -217,15 +322,15 @@ class TestDiarization:
         assert len(engine.model_loads) == 1                 # Whisper reste chargé
         assert engine.align_loads == ["fr", "fr"] and len(engine.diarizer_loads) == 2
 
-    def test_alignment_failure_fails_only_that_file(self, monkeypatch, tmp_path, ready_model, ui_lang):
+    def test_alignment_failure_no_longer_fails_the_file(self, monkeypatch, tmp_path, ready_model, ui_lang):
+        """Changement voulu : avant, un échec d'alignement en mode locuteurs perdait la transcription."""
         engine = FakeEngine(monkeypatch, align_fail=["xx"])
         write_media(tmp_path, "a_fr.wav", "b_xx.wav", "c_fr.wav")
-        received = run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"])
-        errors = [c for c in codes(received) if c.startswith("error:")]
-        assert len(errors) == 1 and errors[0].startswith("error:b_xx.wav")
-        assert "a_fr_base_diarized.txt" in names(tmp_path) and "c_fr_base_diarized.txt" in names(tmp_path)
-        assert "b_xx_base_diarized.txt" not in names(tmp_path)
-        assert codes(received)[-1] == "done_with_errors:1/3"
+        received = codes(run(T.Transcriber(), tmp_path, diarize=True, formats=["txt"]))
+        assert all(f"{stem}_base_diarized.txt" in names(tmp_path) for stem in ("a_fr", "b_xx", "c_fr"))
+        assert not any(c.startswith("error:") for c in received)
+        assert received.count("align_unavailable:xx") == 1 and received[-1] == "all_done"
+        # le fichier suivant (fr) retrouve son modèle d'alignement : pas de cache périmé après l'échec
         assert engine.align_loads == ["fr", "fr"]
 
     def test_model_is_downloaded_before_whisper_is_loaded(self, monkeypatch, tmp_path, model_setup_dirs, ui_lang):
@@ -327,7 +432,7 @@ class TestBatchRobustness:
         with caplog.at_level(logging.INFO, logger="autotranscript.transcriber"):
             run(t, source)
         assert "Traceback" in caplog.text or "RuntimeError: panne" in caplog.text
-        assert "Fichier 1/1 (.wav)" in caplog.text
+        assert "Fichier 1/1 (type wav)" in caplog.text
         assert "secret_entretien" not in caplog.text
 
     def test_whisper_model_is_reused_between_runs_and_replaced_when_it_changes(self, monkeypatch, tmp_path):

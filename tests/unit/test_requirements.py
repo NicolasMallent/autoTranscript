@@ -88,6 +88,22 @@ class TestDebPackage:
         assert not [line for line in postinst.splitlines()
                     if "pip install" in line and "2>/dev/null" in line]
 
+    def test_nltk_data_are_installed_for_every_user(self, postinst):
+        """Dossier du venv : propriété de root, donc accepté par NLTK, lisible par tous, hors ligne."""
+        line = next(l for l in postinst.splitlines() if "nltk.downloader" in l)
+        assert '-d "$VENV_DIR/nltk_data" punkt_tab' in line
+
+    def test_nltk_failure_does_not_abort_the_installation(self, postinst):
+        """`set -e` est actif : le téléchargement doit être testé par un `if`, sinon un échec réseau annule tout."""
+        line = next(l for l in postinst.splitlines() if "nltk.downloader" in l)
+        assert line.lstrip().startswith("if ") and line.rstrip().endswith("then")
+
+    def test_nltk_data_are_only_installed_with_the_full_install(self, postinst):
+        """Dans le repli openai-whisper, nltk n'est pas installé : inutile de tenter le téléchargement."""
+        full_install = postinst.index('pip install -r "$REQUIREMENTS"')
+        fallback = postinst.index("\nelse\n", full_install)
+        assert full_install < postinst.index("nltk.downloader") < fallback
+
     def test_install_log_is_removed_with_the_package(self, script):
         prerm = script[script.index("DEBIAN/prerm"):script.index("PRERM\nchmod")]
         assert "install.log" in prerm

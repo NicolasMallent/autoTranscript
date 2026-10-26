@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 import i18n
 import model_setup
+import nltk_setup
 from paths import BASE_DIR
 
 _logger = logging.getLogger("autotranscript.transcriber")
@@ -249,6 +250,8 @@ class Transcriber:
         self._align_metadata = None
         self._align_lang: Optional[str] = None
         self._diarizer = None
+        # Faux si les données NLTK de découpage en phrases manquent : plus d'alignement pour le lot
+        self._alignment_enabled: bool = True
 
     def cancel(self) -> None:
         """
@@ -286,7 +289,8 @@ class Transcriber:
             max_speakers: Nombre maximal de locuteurs, ou None.
             progress_callback: Appelé avec (code_message, progression entre 0 et 1). Codes émis :
                 loading_model, processing_file, extracting_audio, aligning, diarizing, done_file,
-                error, done_with_errors, all_done, no_audio_found et diarization_model_*.
+                error, done_with_errors, all_done, cancelled, no_audio_found, align_unavailable,
+                sentence_data_download, sentence_data_unavailable et diarization_model_*.
 
         Raises:
             RuntimeError: Si le modèle de diarisation ne peut pas être téléchargé ou chargé.
@@ -323,6 +327,18 @@ class Transcriber:
                 progress_callback("cancelled", 0.0)
                 return
 
+        # Données de découpage en phrases (alignement) : vérifiées AVANT les longues étapes. Sans elles,
+        # l'alignement est désactivé pour tout le lot et l'on garde les segments Whisper, au lieu de
+        # découvrir le problème après des dizaines de minutes de calcul.
+        self._alignment_enabled = WHISPERX_AVAILABLE and nltk_setup.ensure_punkt(progress_callback)
+        if WHISPERX_AVAILABLE and not self._alignment_enabled:
+            _logger.warning("Données NLTK indisponibles : alignement des mots désactivé pour ce lot")
+            progress_callback("sentence_data_unavailable", 0.0)
+        if self._cancelled:
+            _logger.info("Annulé pendant la préparation des données de découpage en phrases")
+            progress_callback("cancelled", 0.0)
+            return
+
         self._load_model(model_name, progress_callback)
 
         failed = 0
@@ -339,10 +355,10 @@ class Transcriber:
                 base_progress = i / len(files)
                 file_progress = 1.0 / len(files)
                 started = time.monotonic()
-                # Pas de nom de fichier dans le log (il peut être partagé) : index et extension seulement
+                # Pas de nom de fichier dans le log (il peut être partagé) : index et type seulement
                 _logger.info(
-                    "Fichier %d/%d (%s) : début", i + 1, len(files),
-                    os.path.splitext(file_path)[1].lower(),
+                    "Fichier %d/%d (type %s) : début", i + 1, len(files),
+                    os.path.splitext(file_path)[1].lower().lstrip("."),
                 )
                 progress_callback(f"processing_file:{os.path.basename(file_path)}", base_progress)
 
@@ -564,6 +580,40 @@ class Transcriber:
         model_a, metadata = self._get_align_model(detected_lang)
         return whisperx.align(result["segments"], model_a, metadata, audio, self._device)
 
+    def _try_align(
+        self, result: dict, audio, language: str, file_path: str,
+        base_progress: float, file_progress: float, cb: Callable,
+    ) -> dict:
+        """
+        Aligne les mots si c'est possible, sinon garde le résultat tel quel.
+
+        Un échec d'alignement (données NLTK, modèle d'alignement, langue sans modèle…) ne doit jamais faire
+        perdre une transcription déjà calculée, qui peut avoir coûté des dizaines de minutes.
+
+        Args:
+            result: Résultat de ``_transcribe`` (clés ``segments`` et ``language``).
+            audio: Tableau audio chargé par ``whisperx.load_audio``.
+            language: Langue demandée par l'utilisateur, ou chaîne vide (détection automatique).
+            file_path: Fichier source (pour les messages de progression).
+            base_progress: Progression du lot au début de ce fichier (entre 0 et 1).
+            file_progress: Part de la progression totale que représente ce fichier.
+            cb: Callback de progression ; reçoit ``align_unavailable:<langue>`` en cas de repli.
+
+        Returns:
+            Le résultat aligné (une entrée par phrase, avec la clé ``language``), ou ``result`` lui-même
+            si l'alignement a échoué : les segments Whisper, plus longs, sont alors conservés.
+        """
+        lang = result.get("language", language or "fr")
+        try:
+            aligned = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
+        except Exception:
+            _logger.warning(
+                "Alignement impossible (langue %s) : horodatage par segment", lang, exc_info=True,
+            )
+            cb(f"align_unavailable:{lang}", base_progress + file_progress * 0.4)
+            return result
+        return {"language": lang, **aligned}
+
     def _run_simple_transcription(
         self, audio_path: str, file_path: str, language: str, formats: list[str],
         base_progress: float, file_progress: float, cb: Callable,
@@ -594,16 +644,8 @@ class Transcriber:
             audio = audio_path
         result = self._transcribe(audio, language)
 
-        if WHISPERX_AVAILABLE:
-            lang = result.get("language", language or "fr")
-            try:
-                aligned = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
-                result = {"language": lang, **aligned}
-            except Exception:
-                _logger.warning(
-                    "Alignement impossible (langue %s) : horodatage par segment", lang, exc_info=True,
-                )
-                cb(f"align_unavailable:{lang}", base_progress + file_progress * 0.4)
+        if WHISPERX_AVAILABLE and self._alignment_enabled:
+            result = self._try_align(result, audio, language, file_path, base_progress, file_progress, cb)
         segments = result["segments"]
 
         _write_outputs(segments, result, file_path, f"_{self._model_name}", formats, with_speakers=False)
@@ -617,6 +659,9 @@ class Transcriber:
     ) -> list:
         """
         Transcrit, aligne les mots, identifie les locuteurs et écrit les sorties demandées.
+
+        Si l'alignement est impossible, les locuteurs sont attribués aux segments Whisper (plus longs)
+        au lieu de perdre la transcription.
 
         Args:
             audio_path: Fichier audio à lire (déjà extrait si la source est une vidéo).
@@ -640,7 +685,8 @@ class Transcriber:
 
         audio = whisperx.load_audio(audio_path)
         result = self._transcribe(audio, language)
-        result = self._align(result, audio, language, file_path, base_progress, file_progress, cb)
+        if self._alignment_enabled:
+            result = self._try_align(result, audio, language, file_path, base_progress, file_progress, cb)
 
         cb(f"diarizing:{os.path.basename(file_path)}", base_progress + file_progress * 0.65)
         diarize_kwargs = {}

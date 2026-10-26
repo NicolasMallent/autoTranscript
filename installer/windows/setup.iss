@@ -1,8 +1,8 @@
 ; AutoTranscript - Script Inno Setup
-; Compile avec : ISCC.exe /DMyAppVersion="2.1.0" setup.iss
+; Compile avec : ISCC.exe /DMyAppVersion="2.1.1" setup.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "2.1.0"
+  #define MyAppVersion "2.1.1"
 #endif
 #define MyAppName      "AutoTranscript"
 #define MyAppPublisher "UPCite - LDAR"

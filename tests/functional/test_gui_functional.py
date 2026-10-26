@@ -40,7 +40,7 @@ def emitted_codes(source_path) -> set[str]:
 @pytest.fixture
 def all_codes(project_root):
     codes = set()
-    for module in ("transcriber.py", "model_setup.py"):
+    for module in ("transcriber.py", "model_setup.py", "nltk_setup.py"):
         codes |= emitted_codes(project_root / "app" / module)
     return codes
 
@@ -53,7 +53,8 @@ def example_message(code: str) -> str:
 
 def test_the_source_scan_finds_the_known_codes(all_codes):
     assert {"processing_file", "done_file", "all_done", "cancelled", "diarization_model_dl",
-            "diarization_model_ready", "error", "done_with_errors"} <= all_codes
+            "diarization_model_ready", "error", "done_with_errors", "sentence_data_download",
+            "sentence_data_unavailable"} <= all_codes
     assert len(all_codes) >= 15
 
 

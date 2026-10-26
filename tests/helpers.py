@@ -2,6 +2,7 @@
 import hashlib
 import io
 import os
+import socket
 import sys
 import types
 import urllib.request
@@ -129,6 +130,62 @@ def make_fake_ffmpeg(tmp_path: Path, *, fail_if_contains=None, fail_always=False
     return str(script)
 
 
+# ── faux nltk ────────────────────────────────────────────────────────────────
+
+class FakeNltk:
+    """
+    Faux module ``nltk`` installé dans ``sys.modules``.
+
+    ``data.find`` échoue (``LookupError``) tant que les données ne sont pas « prêtes » ; ``download``
+    les rend prêtes, sauf indication contraire. Il note aussi le umask et le délai de socket en
+    vigueur pendant le téléchargement.
+
+    Args:
+        monkeypatch: Fixture pytest.
+        ready: Les données sont déjà présentes.
+        download_fails: Exception levée par ``download`` (ex. ``OSError("pas de réseau")``).
+        download_without_data: ``download`` répond « réussi » mais les données restent refusées
+            (c'est ce que fait NLTK quand le dossier n'est pas privé).
+        order: Liste partagée qui reçoit ``("nltk_download",)`` à chaque téléchargement.
+    """
+
+    def __init__(self, monkeypatch, *, ready=False, download_fails=None,
+                 download_without_data=False, order=None):
+        self.ready = ready
+        self.download_fails = download_fails
+        self.download_without_data = download_without_data
+        self.order = order if order is not None else []
+        self.find_calls = []
+        self.download_calls = []
+        self.on_download = None     # appelé au début du téléchargement (ex. pour annuler)
+        self.module = types.ModuleType("nltk")
+        self.module.data = types.SimpleNamespace(find=self._find, path=[])
+        self.module.download = self._download
+        monkeypatch.setitem(sys.modules, "nltk", self.module)
+
+    def _find(self, resource):
+        self.find_calls.append(resource)
+        if not self.ready:
+            raise LookupError(f"Resource {resource} not found")
+        return object()
+
+    def _download(self, name, download_dir=None, quiet=False, raise_on_error=False):
+        umask = os.umask(0)
+        os.umask(umask)
+        self.download_calls.append({
+            "name": name, "download_dir": download_dir, "quiet": quiet,
+            "raise_on_error": raise_on_error, "umask": umask, "timeout": socket.getdefaulttimeout(),
+        })
+        self.order.append(("nltk_download",))
+        if self.on_download:
+            self.on_download()
+        if self.download_fails:
+            raise self.download_fails
+        if not self.download_without_data:
+            self.ready = True
+        return True
+
+
 # ── faux whisperx / torch / whisper ──────────────────────────────────────────
 
 SENTENCES = [
@@ -159,9 +216,13 @@ class FakeEngine:
         align_fail: Langues pour lesquelles ``load_align_model`` échoue.
         openai: True pour simuler l'absence de whisperx (repli openai-whisper).
         cuda: Valeur de ``torch.cuda.is_available()``.
+        punkt_ready: Les données NLTK (punkt_tab) sont déjà présentes.
+        punkt_download_fails: Exception levée par le téléchargement des données NLTK.
+        align_error: Exception levée par ``whisperx.align`` (ex. ``LookupError`` de punkt_tab).
     """
 
-    def __init__(self, monkeypatch, *, align_fail=(), openai=False, cuda=False):
+    def __init__(self, monkeypatch, *, align_fail=(), openai=False, cuda=False,
+                 punkt_ready=True, punkt_download_fails=None, align_error=None):
         import transcriber
 
         self.model_loads = []        # (nom, device, compute_type)
@@ -172,6 +233,10 @@ class FakeEngine:
         self.transcribe_calls = []   # (audio, kwargs)
         self.cuda_empty_cache_calls = 0
         self.align_fail = set(align_fail)
+        self.align_error = align_error
+        self.order = []              # ("load_model", nom), ("nltk_download",) : ordre des étapes lourdes
+        self.nltk = FakeNltk(monkeypatch, ready=punkt_ready, download_fails=punkt_download_fails,
+                             order=self.order)
         engine = self
 
         class Model:
@@ -184,6 +249,7 @@ class FakeEngine:
 
         def load_model(name, device, compute_type=None):
             engine.model_loads.append((name, device, compute_type))
+            engine.order.append(("load_model", name))
             return Model()
 
         def load_align_model(language_code, device):
@@ -195,8 +261,12 @@ class FakeEngine:
         wx.load_model = load_model
         wx.load_audio = lambda path: path
         wx.load_align_model = load_align_model
-        wx.align = lambda segs, model, meta, audio, device: {
-            "segments": [dict(s) for s in SENTENCES], "word_segments": []}
+        def align(segs, model, meta, audio, device):
+            if engine.align_error:
+                raise engine.align_error
+            return {"segments": [dict(s) for s in SENTENCES], "word_segments": []}
+
+        wx.align = align
 
         diarize = types.ModuleType("whisperx.diarize")
 
