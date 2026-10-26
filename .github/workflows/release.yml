@@ -11,9 +11,30 @@ permissions:
 jobs:
 
   # ─────────────────────────────────────────────
+  #  Garde-fou : le tag doit correspondre a _VERSION (app/gui.py), sinon la fenetre
+  #  « A propos » afficherait une autre version que l'installateur et le .deb
+  # ─────────────────────────────────────────────
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifier que le tag correspond a _VERSION
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CODE_VERSION="$(sed -n 's/^_VERSION = "\(.*\)"$/\1/p' app/gui.py)"
+          if [ -z "$CODE_VERSION" ] || [ "$TAG_VERSION" != "$CODE_VERSION" ]; then
+            echo "Le tag '$GITHUB_REF_NAME' ne correspond pas a _VERSION='$CODE_VERSION' (app/gui.py)." >&2
+            echo "Corrigez _VERSION puis recreez le tag." >&2
+            exit 1
+          fi
+          echo "OK : tag $GITHUB_REF_NAME = _VERSION $CODE_VERSION"
+
+  # ─────────────────────────────────────────────
   #  Windows — installateur .exe (Inno Setup)
   # ─────────────────────────────────────────────
   build-windows:
+    needs: check-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +100,7 @@ jobs:
   #  Linux — paquet .deb
   # ─────────────────────────────────────────────
   build-linux:
+    needs: check-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +136,7 @@ jobs:
   #  https://huggingface.co/pyannote/speaker-diarization-community-1
   # ─────────────────────────────────────────────
   package-pyannote:
+    needs: check-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
