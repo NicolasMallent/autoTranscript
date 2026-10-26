@@ -8,6 +8,7 @@ import tempfile
 import time
 from typing import Callable, Optional
 
+import i18n
 import model_setup
 
 _logger = logging.getLogger("autotranscript.transcriber")
@@ -52,12 +53,38 @@ def _srt_timestamp(seconds: float) -> str:
 
 
 def _extract_audio(video_path: str, ffmpeg_bin: str) -> str:
+    """
+    Extrait la piste audio d'une vidéo en WAV mono 16 kHz dans un fichier temporaire.
+
+    Args:
+        video_path: Chemin de la vidéo.
+        ffmpeg_bin: Exécutable ffmpeg (embarqué ou du PATH).
+
+    Returns:
+        Chemin du fichier WAV temporaire, que l'appelant doit supprimer.
+
+    Raises:
+        RuntimeError: Si ffmpeg est introuvable ou échoue (les dernières lignes de sa
+            sortie d'erreur sont incluses dans le message). Le fichier temporaire est
+            alors déjà supprimé.
+    """
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
-    subprocess.run(
-        [ffmpeg_bin, "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", tmp.name],
-        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", tmp.name],
+            check=True, capture_output=True, text=True, errors="replace",
+        )
+    except FileNotFoundError as exc:
+        os.unlink(tmp.name)
+        raise RuntimeError(f"ffmpeg not found ({ffmpeg_bin})") from exc
+    except subprocess.CalledProcessError as exc:
+        os.unlink(tmp.name)
+        # Le chemin du fichier source est remplacé : le log est destiné à être partagé
+        tail = "\n".join((exc.stderr or "").strip().splitlines()[-5:]).replace(video_path, "<input>")
+        _logger.error("ffmpeg a échoué (code %s) :\n%s", exc.returncode, tail)
+        # "from None" : la CalledProcessError d'origine contient la commande, donc le chemin du fichier
+        raise RuntimeError(f"ffmpeg failed (exit code {exc.returncode}): {tail}") from None
     return tmp.name
 
 
@@ -101,12 +128,29 @@ def _write_json(data: dict | list, output_path: str) -> None:
 
 
 def _rename_speakers(raw_segments: list) -> list:
+    """
+    Remplace les identifiants pyannote (SPEAKER_00…) par « Locuteur 1 », « Locuteur 2 »…
+
+    Les locuteurs sont numérotés dans l'ordre de première apparition. Un segment que
+    pyannote n'a attribué à personne reçoit le libellé « Locuteur ? » : il ne doit pas
+    passer pour un locuteur supplémentaire.
+
+    Args:
+        raw_segments: Segments whisperx après ``assign_word_speakers``.
+
+    Returns:
+        Nouvelle liste de segments, avec la clé ``speaker`` renommée (libellés traduits
+        dans la langue de l'interface).
+    """
     mapping: dict = {}
     result = []
     for seg in raw_segments:
-        raw = seg.get("speaker", "INCONNU")
+        raw = seg.get("speaker")
+        if raw is None:
+            result.append({**seg, "speaker": i18n.t("speaker_unknown")})
+            continue
         if raw not in mapping:
-            mapping[raw] = f"Locuteur {len(mapping) + 1}"
+            mapping[raw] = f"{i18n.t('speaker_label')} {len(mapping) + 1}"
         result.append({**seg, "speaker": mapping[raw]})
     return result
 
@@ -166,6 +210,7 @@ class Transcriber:
         else:
             self._load_openai_whisper_model(model_name, progress_callback)
 
+        failed = 0
         for i, file_path in enumerate(files):
             if self._cancelled:
                 _logger.info("Annulation prise en compte avant le fichier %d/%d", i + 1, len(files))
@@ -182,13 +227,13 @@ class Transcriber:
             progress_callback(f"processing_file:{os.path.basename(file_path)}", base_progress)
 
             tmp_audio = None
-            audio_path = file_path
-            if os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS:
-                progress_callback(f"extracting_audio:{os.path.basename(file_path)}", base_progress)
-                tmp_audio = _extract_audio(file_path, ffmpeg_bin)
-                audio_path = tmp_audio
-
             try:
+                audio_path = file_path
+                if os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS:
+                    progress_callback(f"extracting_audio:{os.path.basename(file_path)}", base_progress)
+                    tmp_audio = _extract_audio(file_path, ffmpeg_bin)
+                    audio_path = tmp_audio
+
                 if diarize:
                     segments = self._run_diarization_pipeline(
                         audio_path, file_path, language,
@@ -204,6 +249,14 @@ class Transcriber:
                     segments = self._run_openai_whisper_transcription(
                         audio_path, file_path, language, formats,
                     )
+            except Exception as exc:
+                # Un fichier en échec ne doit pas interrompre le reste du lot
+                failed += 1
+                _logger.exception("Fichier %d/%d : échec", i + 1, len(files))
+                progress_callback(
+                    f"error:{os.path.basename(file_path)} — {exc}", base_progress + file_progress,
+                )
+                continue
             finally:
                 if tmp_audio and os.path.exists(tmp_audio):
                     os.unlink(tmp_audio)
@@ -214,7 +267,12 @@ class Transcriber:
             )
             progress_callback(f"done_file:{os.path.basename(file_path)}", base_progress + file_progress)
 
-        if not self._cancelled:
+        if self._cancelled:
+            return
+        if failed:
+            _logger.warning("%d fichier(s) en échec sur %d", failed, len(files))
+            progress_callback(f"done_with_errors:{failed}/{len(files)}", 1.0)
+        else:
             _logger.info("Toutes les transcriptions sont terminées")
             progress_callback("all_done", 1.0)
 

@@ -123,6 +123,8 @@ Locuteur 1 [00:00:00 - 00:00:06] : Dans le bouquin, non, il y a une partie sur l
 Locuteur 2 [00:00:06 - 00:00:11] : Exactement, c'est ce dont je voulais parler.
 ```
 
+Un passage que l'identification n'a pu attribuer à personne est étiqueté **Locuteur ?** (il n'est pas compté comme un locuteur supplémentaire). Les libellés suivent la langue de l'interface (*Speaker 1*… en anglais).
+
 ### `.srt` (sous-titres)
 
 Format standard compatible VLC, DaVinci Resolve, Word, etc. Permet de réécouter l'enregistrement avec les sous-titres qui défilent automatiquement.

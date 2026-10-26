@@ -507,6 +507,9 @@ class App(ctk.CTk):
                     self._log_append(i18n_mod.t("log_done_file", file=msg.split(":", 1)[1]))
                 elif msg == "all_done":
                     self._log_append(i18n_mod.t("log_all_done"))
+                elif msg.startswith("done_with_errors:"):
+                    failed, total = msg.split(":", 1)[1].split("/")
+                    self._log_append(i18n_mod.t("log_done_with_errors", failed=failed, total=total))
                 elif msg == "no_audio_found":
                     self._log_append(i18n_mod.t("log_no_audio_found"))
                 elif msg.startswith("error:"):

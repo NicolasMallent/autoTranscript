@@ -29,6 +29,9 @@
   "log_done_file": "Done: {file}",
   "log_all_done": "All transcriptions complete.",
   "log_error": "Error: {error}",
+  "log_done_with_errors": "Finished with {failed} error(s) out of {total} file(s). See the log for details.",
+  "speaker_label": "Speaker",
+  "speaker_unknown": "Speaker ?",
   "log_no_audio_found": "No audio or video files found in folder.",
 
   "settings_language_label": "Interface language",

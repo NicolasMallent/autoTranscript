@@ -29,6 +29,9 @@
   "log_done_file": "Terminé : {file}",
   "log_all_done": "Toutes les transcriptions sont terminées.",
   "log_error": "Erreur : {error}",
+  "log_done_with_errors": "Terminé avec {failed} erreur(s) sur {total} fichier(s). Consultez le journal pour le détail.",
+  "speaker_label": "Locuteur",
+  "speaker_unknown": "Locuteur ?",
   "log_no_audio_found": "Aucun fichier audio ou vidéo trouvé dans le dossier.",
 
   "settings_language_label": "Langue de l'interface",
