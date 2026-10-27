@@ -80,6 +80,17 @@ class TestRedact:
         assert "final" not in result or result.endswith("<media>")
         assert ".mp4" not in result
 
+    @pytest.mark.parametrize("text", [
+        "Fichier 1/1 (.mp4) : début", "Fichier 1/1 (type mp4) : début", "fichier .wav seul",
+        "extensions : .mp3, .mkv et .flac",
+    ])
+    def test_an_extension_without_a_file_name_is_not_a_path(self, text):
+        """Le log du transcripteur écrit l'extension seule : elle ne doit pas être prise pour un chemin."""
+        assert log_setup.redact(text) == text
+
+    def test_a_file_name_next_to_parentheses_is_still_masked(self):
+        assert log_setup.redact("échec sur (entretien.mp4) puis [autre.wav]") == "échec sur (<media>) puis [<media>]"
+
     def test_other_extensions_are_kept(self):
         assert log_setup.redact("config.json et notes.txt") == "config.json et notes.txt"
 

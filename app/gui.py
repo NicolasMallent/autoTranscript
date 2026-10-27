@@ -27,7 +27,7 @@ _AUTHORS = [
     "Pierre Andrieu (UPCité - LDAR)",
 ]
 _CONTRIBUTOR = "Nicolas Mallent (Ingénieur R&D Robotique)"
-_VERSION = "2.1.0"
+_VERSION = "2.2.0"
 
 WHISPER_LANGUAGES = {
     "whisper_lang_french": "fr",
@@ -61,6 +61,7 @@ _EVENTS_WITH_ARGUMENT = {            # événement: (clé i18n, nom du paramètr
     "diarizing": ("log_diarizing", "file"),
     "done_file": ("log_done_file", "file"),
     "align_unavailable": ("log_align_unavailable", "lang"),
+    "loading_align_model": ("log_loading_align_model", "lang"),
     "error": ("log_error", "error"),
 }
 _EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
@@ -71,19 +72,58 @@ _EVENTS_WITHOUT_ARGUMENT = {         # événement: clé i18n
     "diarization_model_extracting": "log_diarization_model_extracting",
     "diarization_model_ready": "log_diarization_model_ready",
     "diarization_model_cached": "log_diarization_model_ready",
+    "sentence_data_download": "log_sentence_data_download",
+    "sentence_data_unavailable": "log_sentence_data_unavailable",
+    "diarization_failed": "log_diarization_failed",
 }
 _EVENTS_WITH_COUNTS = {              # événement: (clé i18n, (paramètres), remplace la dernière ligne ?)
     "done_with_errors": ("log_done_with_errors", ("failed", "total"), False),
     "diarization_model_dl": ("log_diarization_model_dl", ("done", "total"), True),
 }
+# Progression d'une étape longue, « <événement>:<pourcentage>/<secondes restantes ou vide> » : une seule
+# ligne du journal, mise à jour sur place. événement: (clé sans estimation, clé avec estimation)
+_EVENTS_IN_PLACE = {
+    "transcribing": ("log_transcribing", "log_transcribing_eta"),
+    "identifying": ("log_identifying", "log_identifying_eta"),
+}
+# Messages qui font seulement avancer la barre (pas de ligne dans le journal)
+_BAR_ONLY_EVENTS = frozenset({"progress"})
 
 
 class _LogLine(NamedTuple):
-    """Ligne de journal à afficher : clé i18n, paramètres, et s'il faut remplacer la dernière ligne."""
+    """
+    Ligne de journal à afficher : clé i18n, paramètres, et comment l'écrire.
+
+    ``replace_last`` remplace toujours la dernière ligne (progression d'un téléchargement).
+    ``in_place`` remplace la précédente ligne de progression, tant qu'aucune autre ligne n'a été
+    ajoutée depuis ; la première est ajoutée.
+    """
 
     key: str
     params: dict
     replace_last: bool = False
+    in_place: bool = False
+
+
+def _format_duration(seconds: int) -> str:
+    """
+    Formate une durée de façon compacte, sans dépendre de la langue : « 45 s », « 12 min », « 1 h 05 ».
+
+    Les minutes sont arrondies à la plus proche ; une durée négative est affichée comme zéro.
+    """
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes = (seconds + 30) // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d}"
+
+
+def _is_number(text: str) -> bool:
+    """Vrai pour une suite non vide de chiffres ASCII (``int`` accepte d'autres écritures, pas nous)."""
+    return text.isascii() and text.isdigit()
 
 
 def _translate_message(msg: str) -> "_LogLine | None":
@@ -104,6 +144,15 @@ def _translate_message(msg: str) -> "_LogLine | None":
     if event in _EVENTS_WITH_ARGUMENT:
         key, parameter = _EVENTS_WITH_ARGUMENT[event]
         return _LogLine(key, {parameter: argument})
+    if event in _EVENTS_IN_PLACE:
+        percent, slash, remaining = argument.partition("/")
+        if not slash or not _is_number(percent) or (remaining and not _is_number(remaining)):
+            return None
+        key, key_with_estimate = _EVENTS_IN_PLACE[event]
+        if remaining:
+            return _LogLine(key_with_estimate,
+                            {"percent": percent, "eta": _format_duration(int(remaining))}, in_place=True)
+        return _LogLine(key, {"percent": percent}, in_place=True)
     if event in _EVENTS_WITH_COUNTS:
         key, (first, second), replace_last = _EVENTS_WITH_COUNTS[event]
         left, slash, right = argument.partition("/")
@@ -266,6 +315,7 @@ class App(ctk.CTk):
         self._transcriber = Transcriber()
         self._queue: queue.Queue = queue.Queue()
         self._running = False
+        self._in_place_active = False   # la dernière ligne du journal est une ligne de progression
         self._selected_path = tk.StringVar(value="")
 
         ctk.set_appearance_mode("system")
@@ -540,6 +590,9 @@ class App(ctk.CTk):
         self._log.insert("end", message + "\n")
         self._log.see("end")
         self._log.configure(state="disabled")
+        # Toute ligne ajoutée, d'où qu'elle vienne, interrompt la mise à jour sur place : une ligne
+        # étrangère (ex. « Chemin du log copié ») ne doit jamais être écrasée par la progression
+        self._in_place_active = False
 
     def _on_open_logs(self) -> None:
         if not log_setup.open_log_folder():
@@ -729,8 +782,12 @@ class App(ctk.CTk):
         text = i18n_mod.t(line.key, **line.params)
         if line.replace_last:
             self._log_replace_last(text)
+            self._in_place_active = False
+        elif line.in_place and self._in_place_active:
+            self._log_replace_last(text)
         else:
             self._log_append(text)
+            self._in_place_active = line.in_place
 
     def _handle_message(self, msg: str, pct: float) -> None:
         """

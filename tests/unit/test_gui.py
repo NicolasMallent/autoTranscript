@@ -501,6 +501,7 @@ class TestTranslateMessage:
         ("done_file:a.mp3", "log_done_file", {"file": "a.mp3"}),
         ("align_unavailable:xx", "log_align_unavailable", {"lang": "xx"}),
         ("error:panne", "log_error", {"error": "panne"}),
+        ("loading_align_model:fr", "log_loading_align_model", {"lang": "fr"}),
     ])
     def test_events_with_an_argument(self, message, key, params):
         assert gui._translate_message(message) == gui._LogLine(key, params)
@@ -513,6 +514,7 @@ class TestTranslateMessage:
         ("diarization_model_extracting", "log_diarization_model_extracting"),
         ("diarization_model_ready", "log_diarization_model_ready"),
         ("diarization_model_cached", "log_diarization_model_ready"),
+        ("diarization_failed", "log_diarization_failed"),
     ])
     def test_events_without_an_argument(self, message, key):
         assert gui._translate_message(message) == gui._LogLine(key, {})
@@ -569,6 +571,7 @@ class TestPollQueue:
             _transcribe_btn=Widget(), _cancel_btn=Widget(),
             _progress=types.SimpleNamespace(set=bar.append),
             _log_append=lines.append, after=lambda delay, callback: scheduled.append(delay),
+            _in_place_active=False,
         )
         for name in ("_poll_queue", "_handle_message", "_show_log_line", "_log_replace_last"):
             setattr(app, name, getattr(gui.App, name).__get__(app))
@@ -645,3 +648,148 @@ class TestFileTypes:
 
     def test_last_choice_shows_everything(self, ui_lang):
         assert gui._file_dialog_filetypes()[-1][1] == "*.*"
+
+
+class TestFormatDuration:
+    @pytest.mark.parametrize("seconds, expected", [
+        (0, "0 s"), (1, "1 s"), (59, "59 s"),
+        (60, "1 min"), (89, "1 min"), (90, "2 min"), (1680, "28 min"),
+        (3599, "1 h 00"), (3600, "1 h 00"), (3900, "1 h 05"), (7265, "2 h 01"),
+    ])
+    def test_compact_human_readable_durations(self, seconds, expected):
+        assert gui._format_duration(seconds) == expected
+
+    def test_negative_durations_are_shown_as_zero(self):
+        assert gui._format_duration(-5) == "0 s"
+
+
+class TestTranslateProgressMessages:
+    def test_transcription_with_an_estimate(self):
+        assert gui._translate_message("transcribing:37/1680") == gui._LogLine(
+            "log_transcribing_eta", {"percent": "37", "eta": "28 min"}, in_place=True)
+
+    def test_transcription_without_an_estimate(self):
+        assert gui._translate_message("transcribing:3/") == gui._LogLine(
+            "log_transcribing", {"percent": "3"}, in_place=True)
+
+    def test_speaker_identification_uses_its_own_texts(self):
+        assert gui._translate_message("identifying:50/90") == gui._LogLine(
+            "log_identifying_eta", {"percent": "50", "eta": "2 min"}, in_place=True)
+        assert gui._translate_message("identifying:0/") == gui._LogLine(
+            "log_identifying", {"percent": "0"}, in_place=True)
+
+    @pytest.mark.parametrize("message", ["transcribing:abc/1", "transcribing:5", "transcribing:/", "transcribing:5/x",
+                                         "transcribing:-3/", "identifying:5/1.5", "transcribing:"])
+    def test_malformed_progress_is_ignored(self, message):
+        assert gui._translate_message(message) is None
+
+    def test_the_bar_only_code_writes_no_line(self):
+        assert gui._translate_message("progress") is None
+        assert "progress" in gui._BAR_ONLY_EVENTS
+
+
+class TestInPlaceLines:
+    """Une ligne de progression remplace la précédente, sans jamais écraser une autre ligne."""
+
+    @pytest.fixture
+    def env(self, ui_lang):
+        app = types.SimpleNamespace(_log=FakeLog(), _in_place_active=False)
+        for name in ("_log_append", "_show_log_line", "_log_replace_last"):
+            setattr(app, name, getattr(gui.App, name).__get__(app))
+        return types.SimpleNamespace(app=app, ui=ui_lang)
+
+    def show(self, env, message):
+        env.app._show_log_line(gui._translate_message(message))
+
+    def deletions(self, env):
+        return [op for op in env.app._log.operations if op[0] == "delete"]
+
+    def inserted(self, env):
+        return [op[2] for op in env.app._log.operations if op[0] == "insert"]
+
+    def test_the_first_progress_line_is_appended(self, env):
+        self.show(env, "transcribing:10/")
+        assert self.deletions(env) == [] and self.inserted(env) == ["Transcription : 10 %\n"]
+
+    def test_the_following_ones_replace_it(self, env):
+        for percent in (10, 11, 12):
+            self.show(env, f"transcribing:{percent}/")
+        assert len(self.deletions(env)) == 2
+        assert self.inserted(env)[-1] == "Transcription : 12 %\n"
+
+    def test_another_line_in_between_interrupts_the_replacement(self, env):
+        self.show(env, "transcribing:10/")
+        self.show(env, "aligning:a.mp3")
+        self.show(env, "transcribing:11/")
+        assert self.deletions(env) == []                       # tout a été ajouté, rien n'a été écrasé
+
+    def test_a_line_added_directly_is_never_overwritten(self, env):
+        """Ex. « Chemin du log copié » ajouté par un clic pendant le calcul."""
+        self.show(env, "transcribing:10/")
+        env.app._log_append("Chemin du log copié")
+        self.show(env, "transcribing:11/")
+        assert self.deletions(env) == []
+        assert self.inserted(env)[-1] == "Transcription : 11 %\n"
+
+    def test_the_model_download_keeps_its_own_replacement(self, env):
+        self.show(env, "diarization_model_dl:1/34")
+        self.show(env, "diarization_model_dl:2/34")
+        assert len(self.deletions(env)) == 2                   # remplace toujours la dernière ligne
+
+    def test_a_progress_line_after_a_download_is_appended(self, env):
+        self.show(env, "diarization_model_dl:2/34")
+        self.show(env, "transcribing:1/")
+        assert len(self.deletions(env)) == 1                   # seul le téléchargement a remplacé
+
+    def test_transcription_then_identification_do_not_overwrite_each_other(self, env):
+        self.show(env, "transcribing:100/")
+        self.show(env, "diarizing:a.mp3")
+        self.show(env, "identifying:0/")
+        assert self.deletions(env) == []
+
+    def test_the_estimate_is_shown_in_the_line(self, env):
+        self.show(env, "transcribing:37/1680")
+        assert self.inserted(env) == ["Transcription : 37 % (reste ~28 min)\n"]
+
+    def test_english_texts(self, env, ui_lang):
+        ui_lang.load("en")
+        self.show(env, "identifying:50/90")
+        assert self.inserted(env) == ["Speakers: 50% (about 2 min left)\n"]
+
+    def test_a_direct_append_resets_the_state(self, env):
+        self.show(env, "transcribing:10/")
+        assert env.app._in_place_active is True
+        env.app._log_append("autre")
+        assert env.app._in_place_active is False
+
+
+class TestPollQueueProgress:
+    """Un message `progress` fait avancer la barre sans écrire dans le journal."""
+
+    @pytest.fixture
+    def env(self, ui_lang):
+        lines, bar = [], []
+        app = types.SimpleNamespace(
+            _queue=queue.Queue(), _log=FakeLog(), _running=True, _transcribe_btn=Widget(), _cancel_btn=Widget(),
+            _progress=types.SimpleNamespace(set=bar.append), _log_append=lines.append,
+            after=lambda delay, callback: None, _in_place_active=False,
+        )
+        for name in ("_poll_queue", "_handle_message", "_show_log_line", "_log_replace_last"):
+            setattr(app, name, getattr(gui.App, name).__get__(app))
+        return types.SimpleNamespace(app=app, lines=lines, bar=bar)
+
+    def test_progress_moves_the_bar_only(self, env):
+        env.app._queue.put(("progress", 0.42))
+        gui.App._poll_queue(env.app)
+        assert env.bar == [0.42] and env.lines == [] and env.app._log.operations == []
+
+    def test_transcription_ticks_update_the_bar_and_one_line(self, env):
+        for percent in (10, 20, 30):
+            env.app._queue.put((f"transcribing:{percent}/", percent / 100))
+        gui.App._poll_queue(env.app)
+        assert env.bar == [0.1, 0.2, 0.3]
+        # 1re ligne ajoutée (journal factice), les deux suivantes remplacent la précédente
+        assert env.lines == ["Transcription : 10 %"]
+        operations = env.app._log.operations
+        assert len([op for op in operations if op[0] == "delete"]) == 2
+        assert [op[2] for op in operations if op[0] == "insert"] == ["Transcription : 20 %\n", "Transcription : 30 %\n"]

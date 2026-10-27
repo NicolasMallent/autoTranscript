@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Construit un paquet .deb pour AutoTranscript
-# Usage : VERSION=2.1.0 ./build-deb.sh
+# Usage : VERSION=2.2.0 ./build-deb.sh
 set -e
 
-VERSION="${VERSION:-2.1.0}"
+VERSION="${VERSION:-2.2.0}"
 PACKAGE="autotranscript"
 ARCH="all"
 APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -65,6 +65,15 @@ echo "Journal d'installation : $LOG_FILE"
 # repli sur openai-whisper (transcription seule, sans identification des locuteurs).
 if "$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS" >> "$LOG_FILE" 2>&1; then
     echo "AutoTranscript : dependances installees (toutes les fonctionnalites disponibles)."
+    # Donnees de decoupage en phrases (alignement des mots) : installees par root dans le venv.
+    # NLTK n'accepte que des dossiers prives (proprietaire root ou l'utilisateur, non modifiables par
+    # les autres) : celui-ci l'est, il est lisible par tous et fonctionne hors ligne. Un echec
+    # n'interrompt pas l'installation : l'application les retelechargera au premier usage.
+    if "$VENV_DIR/bin/python" -m nltk.downloader -d "$VENV_DIR/nltk_data" punkt_tab >> "$LOG_FILE" 2>&1; then
+        echo "AutoTranscript : donnees de decoupage en phrases installees."
+    else
+        echo "AutoTranscript : donnees de decoupage en phrases non installees (voir $LOG_FILE) : telechargement au premier usage."
+    fi
 else
     echo "AutoTranscript : echec de l'installation complete (details dans $LOG_FILE)."
     echo "  Installation de openai-whisper (transcription sans identification des locuteurs)."

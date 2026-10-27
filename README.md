@@ -110,6 +110,7 @@ AUTOTRANSCRIPT_MODEL_DIR=pyannote-community-1/speaker-diarization-community-1 .v
 5. **Sélectionnez le(s) format(s) de sortie** souhaités.
 
 6. Cliquez sur **Transcrire**. Les fichiers résultats sont enregistrés **dans le même dossier** que la source.
+   La barre de progression avance sur l'ensemble des fichiers, et une ligne du journal indique l'avancement de l'étape en cours (transcription, puis identification des locuteurs) avec, pour la transcription, une estimation du temps restant affichée une fois le rythme établi (la progression de l'identification des locuteurs n'étant pas régulière, elle n'indique qu'un pourcentage). Le premier lancement d'un modèle peut être long : il est d'abord téléchargé.
 
 ---
 
@@ -159,6 +160,8 @@ Tous les segments avec métadonnées (timestamps, locuteurs, langue détectée�
 ## Note RGPD
 
 AutoTranscript fonctionne **entièrement hors ligne** une fois les modèles téléchargés. Les fichiers audio/vidéo et les transcriptions ne quittent jamais votre ordinateur. Aucune connexion à un service tiers n'est établie pendant la transcription.
+
+Seuls des **modèles et données publics** sont téléchargés, au premier usage : modèles Whisper et d'alignement des mots, modèle de diarisation (depuis les Releases de ce dépôt) et données de découpage en phrases de NLTK (installées dans `~/.autotranscript/nltk_data`, ou à l'installation du paquet `.deb`). Si ces dernières ne peuvent pas être téléchargées, la transcription continue avec un horodatage par segment au lieu d'un horodatage par phrase.
 
 ---
 

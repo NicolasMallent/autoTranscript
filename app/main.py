@@ -17,6 +17,11 @@ os.environ["PYANNOTE_METRICS_ENABLED"] = "false"
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 import log_setup
+import nltk_setup
+
+# NLTK lit NLTK_DATA une seule fois, à son import : le dossier privé de l'application doit être
+# déclaré avant (voir nltk_setup)
+nltk_setup.setup_env()
 
 if __name__ == "__main__":
     if "--check" in sys.argv:
